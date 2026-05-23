@@ -1,0 +1,36 @@
+# Post-login: visit each bottom-tab and confirm content renders without
+# blowing up. Catches issues like a Resource shape mismatch that 500s the
+# first list endpoint on tab focus.
+appId: uz.identa.mobile
+tags:
+  - navigation
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: _shared/login.yaml
+
+# Dashboard is the landing tab — just confirm header.
+- assertVisible: "Bosh sahifa"
+
+# Patients tab
+- tapOn: "Bemorlar"
+- extendedWaitUntil:
+    visible: "Bemorlar"
+    timeout: 10000
+
+# Appointments tab
+- tapOn: "Navbatlar"
+- extendedWaitUntil:
+    visible: "Navbatlar"
+    timeout: 10000
+
+# Payments tab
+- tapOn: "To'lovlar"
+- extendedWaitUntil:
+    visible: "To'lovlar"
+    timeout: 10000
+
+# Back to Dashboard — confirm we can navigate freely
+- tapOn: "Bosh sahifa"
+- assertVisible: "Bosh sahifa"

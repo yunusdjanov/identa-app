@@ -1,0 +1,25 @@
+# Reusable login subflow. Run from any flow via:
+#   - runFlow:
+#       file: ../_shared/login.yaml
+#
+# Credentials come from MAESTRO_TEST_EMAIL / MAESTRO_TEST_PASSWORD env
+# vars (Maestro substitutes ${...} at run time). DO NOT hardcode a real
+# password here — leave the env vars unset to fail fast in CI without a
+# valid test account.
+appId: uz.identa.mobile
+---
+- assertVisible: "Email"
+- tapOn: "Email"
+- inputText: "${MAESTRO_TEST_EMAIL}"
+- hideKeyboard
+- tapOn:
+    text: "Parol"
+    index: 0
+- inputText: "${MAESTRO_TEST_PASSWORD}"
+- hideKeyboard
+- tapOn: "Kirish"
+# Wait for the Dashboard tab to render — login is async and the cold-start
+# bundle download against live backend can take a few seconds.
+- extendedWaitUntil:
+    visible: "Bosh sahifa"
+    timeout: 15000

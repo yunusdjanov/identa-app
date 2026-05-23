@@ -39,3 +39,20 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# local env (committed: .env.example only)
+.env
+.env.local
+
+# Maestro artifacts (screenshots, logs from local runs)
+.maestro/screenshots/
+.maestro-reports/
+.maestro/.cache/
+
+# EAS submit credentials — never commit these
+secrets/
+*.p8
+play-service-account.json
+
+# Claude Code internal state — per-machine, never committed
+.claude/

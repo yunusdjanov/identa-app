@@ -1,0 +1,16 @@
+# Cold-start smoke: app launches without crashing and lands on the
+# expected first screen (login when no session, dashboard when remembered).
+# Catches RN-level crashes that wouldn't surface in unit tests — missing
+# native modules, broken metro bundle, jailed permissions, etc.
+appId: uz.identa.mobile
+tags:
+  - smoke
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- assertVisible: "Email"
+# The form fields the user has to fill — confirming they all render means
+# the login screen didn't error out mid-mount.
+- assertVisible: "Parol"
+- assertVisible: "Kirish"

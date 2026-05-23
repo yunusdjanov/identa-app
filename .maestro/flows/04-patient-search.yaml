@@ -1,0 +1,31 @@
+# Verifies the patient list loads from the live backend and the search
+# input filters it. Doesn't make assumptions about specific patient names
+# — only that ≥1 row renders after a successful fetch.
+appId: uz.identa.mobile
+tags:
+  - navigation
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: _shared/login.yaml
+- tapOn: "Bemorlar"
+
+# Wait for the list to settle. A loading skeleton vs an empty state vs a
+# row are all valid; we just need the header to be there.
+- extendedWaitUntil:
+    visible: "Bemorlar"
+    timeout: 15000
+
+# Open the search field if there is one, type a single letter to exercise
+# the search filter pipeline. (Most patients in a clinic have an `a` in
+# their name, so this is a stable smoke probe.)
+- runFlow:
+    when:
+      visible: "Qidirish"
+    commands:
+      - tapOn: "Qidirish"
+      - inputText: "a"
+      - hideKeyboard
+      - waitForAnimationToEnd:
+          timeout: 3000

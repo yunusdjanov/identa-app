@@ -1,0 +1,17 @@
+# Happy-path login against the live Railway backend.
+# Sets MAESTRO_TEST_EMAIL / MAESTRO_TEST_PASSWORD as env vars to a real
+# test account that exists on api.identa.uz. Without those env vars set,
+# this flow is expected to fail fast.
+appId: uz.identa.mobile
+tags:
+  - smoke
+  - auth
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: _shared/login.yaml
+# Persistence sanity: after login the Patients tab should be in the bottom
+# nav — confirms the Navigation tree post-auth is intact.
+- assertVisible: "Bemorlar"
+- assertVisible: "Navbatlar"

@@ -1,0 +1,17 @@
+# Maestro workspace config — see https://maestro.mobile.dev/cli/configuration
+#
+# Run any single flow:
+#   maestro test .maestro/flows/00-smoke.yaml
+# Run the full suite (excluding _shared/ helpers):
+#   maestro test .maestro/flows
+# Set credentials without checking them in:
+#   MAESTRO_TEST_EMAIL=you@identa.uz MAESTRO_TEST_PASSWORD=secret maestro test .maestro/flows
+
+flows:
+  - flows/
+
+# Suites you'd target individually in CI.
+includeTags:
+  - smoke
+  - auth
+  - navigation

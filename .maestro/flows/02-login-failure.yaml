@@ -1,0 +1,26 @@
+# Wrong-password path — verifies the error toast surfaces and the user
+# stays on the login screen rather than being kicked to a broken state.
+appId: uz.identa.mobile
+tags:
+  - auth
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- tapOn: "Email"
+- inputText: "nobody@identa.uz"
+- hideKeyboard
+- tapOn:
+    text: "Parol"
+    index: 0
+- inputText: "definitely-wrong-pw"
+- hideKeyboard
+- tapOn: "Kirish"
+# The CSRF dance + axios interceptor should normalize this into a 401 or
+# validation error. UI should remain on login.
+- extendedWaitUntil:
+    visible: "Kirish"
+    timeout: 15000
+# The form fields are still there — we weren't navigated away.
+- assertVisible: "Email"
+- assertVisible: "Parol"

@@ -1,30 +1,124 @@
 {
   "expo": {
-    "name": "identa-mobile-temp",
-    "slug": "identa-mobile-temp",
+    "name": "Identa",
+    "slug": "identa",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "icon": "./assets/brand/identa-full.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "identa",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/brand/identa-full.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#F0FAF8"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "uz.identa.mobile",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Identa uses the camera to capture patient and treatment photos for the clinical record.",
+        "NSPhotoLibraryUsageDescription": "Identa accesses your photo library to attach existing patient or treatment images to the clinical record.",
+        "NSPhotoLibraryAddUsageDescription": "Identa saves treatment photos you export to your photo library.",
+        "NSFaceIDUsageDescription": "Identa uses Face ID to unlock the app and protect patient data.",
+        "NSUserNotificationUsageDescription": "Identa sends reminders for upcoming appointments and clinic activity.",
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
+      },
+      "associatedDomains": [
+        "applinks:identa.uz",
+        "applinks:app.identa.uz"
+      ]
     },
     "android": {
+      "package": "uz.identa.mobile",
+      "versionCode": 1,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/brand/identa-full.png",
+        "backgroundColor": "#F0FAF8"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES",
+        "POST_NOTIFICATIONS",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "VIBRATE",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ],
+      "blockedPermissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "identa.uz"
+            },
+            {
+              "scheme": "https",
+              "host": "app.identa.uz"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/brand/identa-icon.png"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Identa accesses your photo library to attach existing patient or treatment images to the clinical record.",
+          "cameraPermission": "Identa uses the camera to capture patient and treatment photos for the clinical record."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/brand/identa-icon.png",
+          "color": "#0F766E",
+          "sounds": []
+        }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "REPLACE_WITH_SENTRY_ORG_SLUG",
+          "project": "identa-mobile",
+          "url": "https://sentry.io/"
+        }
+      ]
+    ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/REPLACE_AFTER_EAS_UPDATE_CONFIGURE",
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
+    },
+    "extra": {
+      "eas": {}
     }
   }
 }
