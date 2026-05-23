@@ -2,7 +2,13 @@ import client from './client'
 import { requireOnline } from '../lib/offlineGuard'
 import type { ApiSession } from '../types'
 
-const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK_API !== 'false'
+// HARDCODED MOCK: backend doesn't expose a session activity endpoint
+// yet (no /sessions/activity route — only Sanctum's personal_access_tokens
+// table). The Settings → Sessions sheet ships with seeded data so the UI
+// stays functional. Flip this once backend adds `GET /sessions/activity`
+// + `DELETE /sessions/{id}` (Sanctum already supports per-token revoke,
+// just needs the listing endpoint).
+const USE_MOCK = true
 
 function mockDelay<T>(value: T, ms = 400): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms))

@@ -1,6 +1,11 @@
 import client from './client'
 
-const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK_API !== 'false'
+// HARDCODED MOCK: backend doesn't expose a push-token registration
+// endpoint yet (no /devices/register route). Local reminders work fine
+// without server registration; remote push will need this endpoint to
+// route notifications to the right device. Flip once backend adds
+// `POST /devices/register` (or similar) plus a `devices` table.
+const USE_MOCK = true
 
 interface RegisterDevicePayload {
   expo_push_token: string

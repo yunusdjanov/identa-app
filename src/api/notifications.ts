@@ -1,6 +1,11 @@
 import { requireOnline } from '../lib/offlineGuard'
 
-const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK_API !== 'false'
+// HARDCODED MOCK: backend doesn't expose a notification-preferences
+// endpoint yet (no /settings/notifications route). UI ships with a local
+// store so the Notifications sheet stays functional; flip this to a
+// real call once the backend adds `GET/PUT /settings/notifications`.
+// Tracking issue: pending backend follow-up.
+const USE_MOCK = true
 
 function mockDelay<T>(value: T, ms = 300): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms))
@@ -25,17 +30,13 @@ const DEFAULT_PREFS: NotificationPrefs = {
 let MOCK_PREFS: NotificationPrefs = { ...DEFAULT_PREFS }
 
 export const getNotificationPrefs = async (): Promise<NotificationPrefs> => {
-  if (USE_MOCK) return mockDelay({ ...MOCK_PREFS })
-  throw new Error('Real backend not implemented')
+  return mockDelay({ ...MOCK_PREFS })
 }
 
 export const updateNotificationPrefs = async (
   prefs: Partial<NotificationPrefs>
 ): Promise<NotificationPrefs> => {
   requireOnline()
-  if (USE_MOCK) {
-    MOCK_PREFS = { ...MOCK_PREFS, ...prefs }
-    return mockDelay({ ...MOCK_PREFS }, 250)
-  }
-  throw new Error('Real backend not implemented')
+  MOCK_PREFS = { ...MOCK_PREFS, ...prefs }
+  return mockDelay({ ...MOCK_PREFS }, 250)
 }
