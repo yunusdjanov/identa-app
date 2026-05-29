@@ -20,6 +20,10 @@ interface Props {
   onClose: () => void
   onAddPatient: () => void
   onNewAppointment: () => void
+  // Permission/subscription gates from the parent. Default true so existing
+  // callers keep working; CustomTabBar passes the real values.
+  canAddPatient?: boolean
+  canNewAppointment?: boolean
 }
 
 interface Action {
@@ -36,6 +40,8 @@ export default function CreateActionSheet({
   onClose,
   onAddPatient,
   onNewAppointment,
+  canAddPatient = true,
+  canNewAppointment = true,
 }: Props) {
   const insets = useSafeAreaInsets()
   const { t } = useI18n()
@@ -76,22 +82,30 @@ export default function CreateActionSheet({
   }
 
   const actions: Action[] = [
-    {
-      iconName: 'calendar',
-      iconColor: '#FFFFFF',
-      iconBg: c.brand,
-      title: t('create.newAppointment'),
-      description: t('create.newAppointmentDesc'),
-      onPress: tap(onNewAppointment),
-    },
-    {
-      iconName: 'person-add',
-      iconColor: '#FFFFFF',
-      iconBg: c.brand,
-      title: t('create.addPatient'),
-      description: t('create.addPatientDesc'),
-      onPress: tap(onAddPatient),
-    },
+    ...(canNewAppointment
+      ? [
+          {
+            iconName: 'calendar' as IconName,
+            iconColor: '#FFFFFF',
+            iconBg: c.brand as string,
+            title: t('create.newAppointment'),
+            description: t('create.newAppointmentDesc'),
+            onPress: tap(onNewAppointment),
+          },
+        ]
+      : []),
+    ...(canAddPatient
+      ? [
+          {
+            iconName: 'person-add' as IconName,
+            iconColor: '#FFFFFF',
+            iconBg: c.brand as string,
+            title: t('create.addPatient'),
+            description: t('create.addPatientDesc'),
+            onPress: tap(onAddPatient),
+          },
+        ]
+      : []),
   ]
 
   return (

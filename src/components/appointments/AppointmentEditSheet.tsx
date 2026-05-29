@@ -14,6 +14,7 @@ import { getTranslationArray } from '../../i18n/helpers'
 import { isOfflineError } from '../../lib/offlineGuard'
 import type { Locale } from '../../constants'
 import { listAppointments, updateAppointment } from '../../api/appointments'
+import { getProfile } from '../../api/profile'
 import {
   scheduleAppointmentReminder,
   cancelAppointmentReminder,
@@ -96,15 +97,30 @@ export default function AppointmentEditSheet({ visible, appointment, onClose, on
     (a) => a.id !== appointment?.id && a.status !== 'cancelled' && a.status !== 'no_show'
   )
 
+  // Clinic working hours from profile settings; fall back to 08:00–20:00.
+  const profileQuery = useQuery({
+    queryKey: ['profile'],
+    queryFn: getProfile,
+    enabled: visible,
+    staleTime: 5 * 60_000,
+  })
+  const workStart = parseHm(profileQuery.data?.working_hours?.start) ?? WORK_START
+  const workEnd = parseHm(profileQuery.data?.working_hours?.end) ?? WORK_END
+
   const today = useMemo(() => new Date(), [])
   const isToday = isSameDay(date, today)
   // When editing an existing appointment we never block past slots — the user
   // may be correcting a missed appointment. We only block other-booking
   // overlaps and overflow.
-  const slotValid = isSlotValid(time, duration, otherActiveAppts, status)
-  const canSubmit = slotValid
+  const slotValid = isSlotValid(time, duration, otherActiveAppts, status, workEnd)
+  // The backend forbids editing an appointment that is already finalized
+  // (completed/cancelled/no_show) — AppointmentService throws
+  // `finalized_cannot_be_edited`. Disable save and show a notice instead of
+  // letting the PUT 422.
+  const isFinalized = appointment != null && appointment.status !== 'scheduled'
+  const canSubmit = slotValid && !isFinalized
 
-  const slots = useMemo(() => generateTimeSlots(), [])
+  const slots = useMemo(() => generateTimeSlots(workStart, workEnd), [workStart, workEnd])
   const { morningSlots, afternoonSlots, eveningSlots } = useMemo(() => {
     return {
       morningSlots: slots.filter((s) => toMin(s) < MORNING_END),
@@ -118,10 +134,10 @@ export default function AppointmentEditSheet({ visible, appointment, onClose, on
   const blockerBySlot = useMemo(() => {
     const map = new Map<string, ReturnType<typeof findBlocker>>()
     for (const slot of slots) {
-      map.set(slot, findBlocker(slot, duration, otherActiveAppts, status))
+      map.set(slot, findBlocker(slot, duration, otherActiveAppts, status, workEnd))
     }
     return map
-  }, [slots, duration, otherActiveAppts, status])
+  }, [slots, duration, otherActiveAppts, status, workEnd])
 
   const dateStripDays = useMemo(() => {
     // Show 7 days back + 21 forward so a past appointment's date stays
@@ -137,6 +153,10 @@ export default function AppointmentEditSheet({ visible, appointment, onClose, on
   const mutation = useMutation({
     mutationFn: () =>
       updateAppointment(appointment!.id, {
+        // patient_id is required by the backend on update (UpdateAppointmentRequest
+        // extends StoreAppointmentRequest where it's `required`). Carry it from
+        // the existing appointment so edits don't 422.
+        patient_id: appointment!.patient_id,
         appointment_date: dateKey,
         start_time: time,
         end_time: minToTime(toMin(time) + duration),
@@ -165,7 +185,7 @@ export default function AppointmentEditSheet({ visible, appointment, onClose, on
   })
 
   const onSlotPress = (slot: string) => {
-    const blocker = findBlocker(slot, duration, otherActiveAppts, status)
+    const blocker = findBlocker(slot, duration, otherActiveAppts, status, workEnd)
     if (blocker === 'overflow') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
       return
@@ -423,6 +443,19 @@ export default function AppointmentEditSheet({ visible, appointment, onClose, on
         </ScrollView>
       </View>
 
+      {isFinalized ? (
+        <Text
+          style={{
+            color: c.danger as string,
+            fontSize: 13,
+            textAlign: 'center',
+            marginTop: spacing.sm,
+          }}
+        >
+          {t('appointments.edit.finalized')}
+        </Text>
+      ) : null}
+
       <Button
         title={mutation.isPending ? t('appointments.edit.saving') : t('appointments.edit.save')}
         onPress={handleSubmit}
@@ -524,11 +557,12 @@ function findBlocker(
   slot: string,
   duration: number,
   appts: ApiAppointment[],
-  status: ApiAppointment['status']
+  status: ApiAppointment['status'],
+  workEnd: number = WORK_END
 ): null | 'overflow' | ApiAppointment {
   const start = toMin(slot)
   const end = start + duration
-  if (end > WORK_END) return 'overflow'
+  if (end > workEnd) return 'overflow'
   // Only enforce conflicts when the appointment is/becomes scheduled. A
   // cancelled or no_show edit can share a time without false alarms.
   if (status !== 'scheduled') return null
@@ -544,9 +578,10 @@ function isSlotValid(
   slot: string,
   duration: number,
   appts: ApiAppointment[],
-  status: ApiAppointment['status']
+  status: ApiAppointment['status'],
+  workEnd: number = WORK_END
 ): boolean {
-  return findBlocker(slot, duration, appts, status) === null
+  return findBlocker(slot, duration, appts, status, workEnd) === null
 }
 
 function toMin(time: string): number {
@@ -561,12 +596,23 @@ function minToTime(min: number): string {
 function computeDuration(start: string, end: string): number {
   return toMin(end) - toMin(start)
 }
-function generateTimeSlots(): string[] {
+function generateTimeSlots(workStart: number = WORK_START, workEnd: number = WORK_END): string[] {
   const slots: string[] = []
-  for (let m = WORK_START; m <= WORK_END - 15; m += SLOT_STEP) {
+  for (let m = workStart; m <= workEnd - 15; m += SLOT_STEP) {
     slots.push(minToTime(m))
   }
   return slots
+}
+
+// Parse "HH:mm" into minutes-since-midnight; null for missing/invalid input.
+function parseHm(value: string | null | undefined): number | null {
+  if (!value) return null
+  const m = /^(\d{1,2}):(\d{2})$/.exec(value)
+  if (!m) return null
+  const h = parseInt(m[1]!, 10)
+  const min = parseInt(m[2]!, 10)
+  if (h > 23 || min > 59) return null
+  return h * 60 + min
 }
 
 function makeStyles(c: Colors) {

@@ -20,6 +20,8 @@ import { useI18n } from '../../i18n'
 import { radius, spacing, typography, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import { isOfflineError } from '../../lib/offlineGuard'
+import { useAuthStore } from '../../stores/auth'
+import { canManage } from '../../lib/permissions'
 import type { ApiPatientCategory } from '../../types'
 
 interface Props {
@@ -53,6 +55,11 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
   })
 
   const categories = categoriesQuery.data ?? []
+
+  // Category writes are gated by `patients.manage` on the backend. View-only
+  // assistants and read_only subscriptions get a read-only list.
+  const user = useAuthStore((s) => s.user)
+  const canManageCats = canManage(user, 'patients')
 
   // Form state for create/edit
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -204,7 +211,7 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
             />
           </View>
         </View>
-      ) : (
+      ) : canManageCats ? (
         <Button
           title={t('patients.categories.addNew')}
           variant="tinted"
@@ -213,7 +220,7 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
           leftIcon={<Icon name="add" size={18} color={c.brandDeep as string} />}
           onPress={openCreate}
         />
-      )}
+      ) : null}
 
       {/* List */}
       {categories.length === 0 && !showForm ? (
@@ -231,20 +238,24 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
                 <Text style={styles.name} numberOfLines={1}>
                   {cat.name}
                 </Text>
-                <Pressable
-                  onPress={() => openEdit(cat)}
-                  hitSlop={8}
-                  style={styles.actionBtn}
-                >
-                  <Icon name="create-outline" size={18} color={c.brand as string} />
-                </Pressable>
-                <Pressable
-                  onPress={() => onDelete(cat)}
-                  hitSlop={8}
-                  style={styles.actionBtn}
-                >
-                  <Icon name="trash-outline" size={18} color={c.danger as string} />
-                </Pressable>
+                {canManageCats ? (
+                  <>
+                    <Pressable
+                      onPress={() => openEdit(cat)}
+                      hitSlop={8}
+                      style={styles.actionBtn}
+                    >
+                      <Icon name="create-outline" size={18} color={c.brand as string} />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => onDelete(cat)}
+                      hitSlop={8}
+                      style={styles.actionBtn}
+                    >
+                      <Icon name="trash-outline" size={18} color={c.danger as string} />
+                    </Pressable>
+                  </>
+                ) : null}
               </View>
               {idx < categories.length - 1 ? <View style={styles.separator} /> : null}
             </React.Fragment>

@@ -22,6 +22,7 @@ import { getTranslationArray } from '../../i18n/helpers'
 import { isOfflineError } from '../../lib/offlineGuard'
 import type { Locale } from '../../constants'
 import { listPatients } from '../../api/patients'
+import { getProfile } from '../../api/profile'
 import { createAppointment, listAppointments } from '../../api/appointments'
 import { scheduleAppointmentReminder, ensureNotificationPermissions } from '../../lib/notifications'
 import {
@@ -41,7 +42,10 @@ interface Props {
   visible: boolean
   onClose: () => void
   defaultDate?: Date
-  onCreated?: () => void
+  // Receives the freshly-created appointment so the caller can react with
+  // context (e.g. jump the AppointmentsScreen to its date). Optional to
+  // preserve backward compatibility for callers that don't care.
+  onCreated?: (created: ApiAppointment) => void
 }
 
 const DURATION_OPTIONS = [15, 30, 45, 60, 90, 120]
@@ -74,6 +78,17 @@ export default function AppointmentCreateSheet({
   // future; the calendar handles dates beyond DATE_STRIP_DAYS or quick
   // jumps to a specific day-of-week several months out.
   const [calendarOpen, setCalendarOpen] = useState(false)
+
+  // Clinic working hours come from the dentist's profile settings. Fall back
+  // to the default 08:00–20:00 window until the profile loads (or if unset).
+  const profileQuery = useQuery({
+    queryKey: ['profile'],
+    queryFn: getProfile,
+    enabled: visible,
+    staleTime: 5 * 60_000,
+  })
+  const workStart = parseHm(profileQuery.data?.working_hours?.start) ?? WORK_START
+  const workEnd = parseHm(profileQuery.data?.working_hours?.end) ?? WORK_END
 
   // Reset when sheet opens. We pick a sensible default time after the
   // appointments load (see effect below); 09:00 here is just a placeholder.
@@ -121,9 +136,9 @@ export default function AppointmentCreateSheet({
   useEffect(() => {
     if (!visible) return
     const isToday = isSameDay(date, today)
-    const stillValid = isSlotValid(time, duration, activeAppts, isToday ? today : null)
+    const stillValid = isSlotValid(time, duration, activeAppts, isToday ? today : null, workEnd)
     if (stillValid) return
-    const next = findFirstFreeSlot(activeAppts, duration, isToday ? today : null)
+    const next = findFirstFreeSlot(activeAppts, duration, isToday ? today : null, workStart, workEnd)
     if (next) setTime(next)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, dateKey, duration, dayQuery.dataUpdatedAt])
@@ -149,7 +164,7 @@ export default function AppointmentCreateSheet({
           if (granted) scheduleAppointmentReminder(created).catch(() => {})
         })
         .catch(() => {})
-      onCreated?.()
+      onCreated?.(created)
       onClose()
     },
     onError: (err) => {
@@ -159,7 +174,7 @@ export default function AppointmentCreateSheet({
   })
 
   const isToday = isSameDay(date, today)
-  const slotValid = isSlotValid(time, duration, activeAppts, isToday ? today : null)
+  const slotValid = isSlotValid(time, duration, activeAppts, isToday ? today : null, workEnd)
   const canSubmit = Boolean(patient) && slotValid
 
   const handleSubmit = () => {
@@ -172,7 +187,7 @@ export default function AppointmentCreateSheet({
 
   // Time slots grouped by morning / afternoon / evening. The grouping
   // itself depends only on the static slot list, so it's memoized once.
-  const slots = useMemo(() => generateTimeSlots(), [])
+  const slots = useMemo(() => generateTimeSlots(workStart, workEnd), [workStart, workEnd])
   const { morningSlots, afternoonSlots, eveningSlots } = useMemo(() => {
     return {
       morningSlots: slots.filter((s) => toMin(s) < MORNING_END),
@@ -187,10 +202,10 @@ export default function AppointmentCreateSheet({
   const blockerBySlot = useMemo(() => {
     const map = new Map<string, ReturnType<typeof findBlocker>>()
     for (const slot of slots) {
-      map.set(slot, findBlocker(slot, duration, activeAppts, isToday ? today : null))
+      map.set(slot, findBlocker(slot, duration, activeAppts, isToday ? today : null, workEnd))
     }
     return map
-  }, [slots, duration, activeAppts, isToday, today])
+  }, [slots, duration, activeAppts, isToday, today, workEnd])
 
   const dateStripDays = useMemo(
     () => Array.from({ length: DATE_STRIP_DAYS }, (_, i) => addDays(today, i)),
@@ -203,7 +218,7 @@ export default function AppointmentCreateSheet({
   )
 
   const onSlotPress = (slot: string) => {
-    const blocker = findBlocker(slot, duration, activeAppts, isToday ? today : null)
+    const blocker = findBlocker(slot, duration, activeAppts, isToday ? today : null, workEnd)
     if (blocker === 'past') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
       return
@@ -640,7 +655,8 @@ function findBlocker(
   slot: string,
   duration: number,
   appts: ApiAppointment[],
-  now: Date | null
+  now: Date | null,
+  workEnd: number = WORK_END
 ): null | 'past' | 'overflow' | ApiAppointment {
   const start = toMin(slot)
   const end = start + duration
@@ -648,7 +664,7 @@ function findBlocker(
     const nowMin = now.getHours() * 60 + now.getMinutes()
     if (start < nowMin) return 'past'
   }
-  if (end > WORK_END) return 'overflow'
+  if (end > workEnd) return 'overflow'
   for (const a of appts) {
     const aStart = toMin(a.start_time)
     const aEnd = toMin(a.end_time)
@@ -661,24 +677,27 @@ function isSlotValid(
   slot: string,
   duration: number,
   appts: ApiAppointment[],
-  now: Date | null
+  now: Date | null,
+  workEnd: number = WORK_END
 ): boolean {
-  return findBlocker(slot, duration, appts, now) === null
+  return findBlocker(slot, duration, appts, now, workEnd) === null
 }
 
 function findFirstFreeSlot(
   appts: ApiAppointment[],
   duration: number,
-  now: Date | null
+  now: Date | null,
+  workStart: number = WORK_START,
+  workEnd: number = WORK_END
 ): string | null {
-  let start = WORK_START
+  let start = workStart
   if (now) {
     const nowMin = now.getHours() * 60 + now.getMinutes()
-    start = Math.max(WORK_START, Math.ceil(nowMin / SLOT_STEP) * SLOT_STEP)
+    start = Math.max(workStart, Math.ceil(nowMin / SLOT_STEP) * SLOT_STEP)
   }
-  for (let m = start; m + duration <= WORK_END; m += SLOT_STEP) {
+  for (let m = start; m + duration <= workEnd; m += SLOT_STEP) {
     const slot = minToTime(m)
-    if (isSlotValid(slot, duration, appts, now)) return slot
+    if (isSlotValid(slot, duration, appts, now, workEnd)) return slot
   }
   return null
 }
@@ -692,12 +711,24 @@ function minToTime(min: number): string {
   const m = min % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
-function generateTimeSlots(): string[] {
+function generateTimeSlots(workStart: number = WORK_START, workEnd: number = WORK_END): string[] {
   const slots: string[] = []
-  for (let m = WORK_START; m <= WORK_END - 15; m += SLOT_STEP) {
+  for (let m = workStart; m <= workEnd - 15; m += SLOT_STEP) {
     slots.push(minToTime(m))
   }
   return slots
+}
+
+// Parse "HH:mm" into minutes-since-midnight. Returns null for missing/invalid
+// input so callers can fall back to the default work window.
+function parseHm(value: string | null | undefined): number | null {
+  if (!value) return null
+  const m = /^(\d{1,2}):(\d{2})$/.exec(value)
+  if (!m) return null
+  const h = parseInt(m[1]!, 10)
+  const min = parseInt(m[2]!, 10)
+  if (h > 23 || min > 59) return null
+  return h * 60 + min
 }
 
 function makeStyles(c: Colors) {

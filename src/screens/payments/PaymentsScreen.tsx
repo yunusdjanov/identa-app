@@ -24,6 +24,7 @@ import { ListRowSkeleton } from '../../components/ui/Skeleton'
 import PatientDebtRow, { PatientDebtData } from '../../components/payments/PatientDebtRow'
 import TreatmentHistoryRow from '../../components/payments/TreatmentHistoryRow'
 import TreatmentDetailSheet from '../../components/payments/TreatmentDetailSheet'
+import { TreatmentEditSheet } from '../../components/treatments'
 import { useToast } from '../../components/ui/Toast'
 
 import { useI18n } from '../../i18n'
@@ -56,6 +57,11 @@ export default function PaymentsScreen() {
   const [tab, setTab] = useState<Tab>('patients')
   const [search, setSearch] = useState('')
   const [selectedTreatment, setSelectedTreatment] = useState<ApiTreatment | null>(null)
+  // Separate state for the edit-mode sheet — detail and edit can't be open
+  // simultaneously (we close detail before opening edit) but each needs its
+  // own treatment reference so the right one renders during the animation
+  // handoff.
+  const [editTreatment, setEditTreatment] = useState<ApiTreatment | null>(null)
   const [treatmentSheetOpen, setTreatmentSheetOpen] = useState(false)
 
   const query = useQuery({
@@ -336,6 +342,20 @@ export default function PaymentsScreen() {
         treatment={selectedTreatment}
         onClose={() => setTreatmentSheetOpen(false)}
         onUpdated={(updated) => setSelectedTreatment(updated)}
+        onEditRequested={(tr) => {
+          // Defer the edit sheet open by one frame so the detail sheet's
+          // dismiss animation finishes first (otherwise two backdrops stack
+          // and the entry sheet appears under the previous one on iOS).
+          setTreatmentSheetOpen(false)
+          setTimeout(() => setEditTreatment(tr), 220)
+        }}
+      />
+
+      <TreatmentEditSheet
+        visible={editTreatment !== null}
+        patientId={editTreatment?.patient_id ?? ''}
+        treatment={editTreatment}
+        onClose={() => setEditTreatment(null)}
       />
     </View>
   )

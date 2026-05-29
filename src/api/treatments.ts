@@ -1,7 +1,13 @@
 import client from './client'
 import { requireOnline } from '../lib/offlineGuard'
 import { recordQuickPayment, type QuickPaymentPayload } from './payments'
-import type { ApiTreatment, ApiTreatmentPayment, ApiListResponse } from '../types'
+import type {
+  ApiTreatment,
+  ApiTreatmentImage,
+  ApiTreatmentPayment,
+  ApiListResponse,
+  ApiResponse,
+} from '../types'
 
 // Per-resource override. Flip via `EXPO_PUBLIC_MOCK_TREATMENTS=false`.
 //
@@ -166,6 +172,9 @@ export const recordPayment = async (input: RecordPaymentInput): Promise<ApiTreat
     const idx = MOCK_CACHE.findIndex((t) => t.id === input.treatment_id)
     if (idx < 0) throw new Error('Treatment not found')
     const tr = MOCK_CACHE[idx]!
+    // Cap at the remaining balance to mirror the real backend, which rejects
+    // a treatment-linked quick-payment that exceeds the balance
+    // (QuickPaymentService → amount_exceeds_balance).
     const applied = Math.min(tr.balance, input.amount)
     const newPaid = tr.paid_amount + applied
     const newPayment: ApiTreatmentPayment = {
@@ -284,5 +293,202 @@ function normalizeTreatmentFromApi(treatment: ApiTreatment): ApiTreatment {
     amount: p.amount,
     recorded_at: p.recorded_at ?? p.created_at ?? p.payment_date ?? '',
   }))
-  return { ...treatment, payments }
+  return {
+    ...treatment,
+    payments,
+    // Backend may omit `images: []` when image_count is 0. Default so the UI
+    // can always iterate safely without optional chaining everywhere.
+    images: treatment.images ?? [],
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Treatment CRUD (per-patient)
+//
+// Mirrors the web app's contract:
+//   POST   /patients/{id}/treatments
+//   PUT    /patients/{id}/treatments/{tid}
+//   DELETE /patients/{id}/treatments/{tid}
+//   GET    /patients/{id}/treatments/{tid}        (single fetch + include images)
+//
+// On the mobile side these always hit the real backend — there's no
+// per-feature mock fork because the create/edit UI was missing entirely
+// before this change. (listTreatments still has its mock path for
+// development demos with EXPO_PUBLIC_MOCK_TREATMENTS=true.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TreatmentPayload {
+  // teeth is the canonical multi-tooth array (Universal numbering 1–32).
+  // Send empty array for "no specific tooth" entries (generic consult).
+  teeth: number[]
+  treatment_type: string
+  treatment_date: string  // YYYY-MM-DD
+  comment?: string | null
+  description?: string | null
+  debt_amount?: number
+  paid_amount?: number
+}
+
+export async function getPatientTreatment(
+  patientId: string,
+  treatmentId: string
+): Promise<ApiTreatment> {
+  const r = await client.get<ApiResponse<ApiTreatment>>(
+    `/patients/${patientId}/treatments/${treatmentId}?include_images=true`
+  )
+  return normalizeTreatmentFromApi(r.data.data)
+}
+
+export async function createPatientTreatment(
+  patientId: string,
+  payload: TreatmentPayload
+): Promise<ApiTreatment> {
+  requireOnline()
+  const r = await client.post<ApiResponse<ApiTreatment>>(
+    `/patients/${patientId}/treatments`,
+    payload
+  )
+  return normalizeTreatmentFromApi(r.data.data)
+}
+
+export async function updatePatientTreatment(
+  patientId: string,
+  treatmentId: string,
+  payload: TreatmentPayload
+): Promise<ApiTreatment> {
+  requireOnline()
+  const r = await client.put<ApiResponse<ApiTreatment>>(
+    `/patients/${patientId}/treatments/${treatmentId}`,
+    payload
+  )
+  return normalizeTreatmentFromApi(r.data.data)
+}
+
+export async function deletePatientTreatment(
+  patientId: string,
+  treatmentId: string
+): Promise<void> {
+  requireOnline()
+  await client.delete(`/patients/${patientId}/treatments/${treatmentId}`)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Treatment image upload (multipart)
+//
+// The backend offers three upload paths:
+//   1. POST /patients/{id}/treatments/{tid}/images                  ← we use this
+//   2. POST .../images/direct-upload + PUT signed URL + complete    (S3 signed)
+//   3. POST .../images/direct-upload-batch + complete               (batch S3)
+//
+// We pick the multipart path (#1) because it's a single round trip and the
+// backend already validates / scans / variant-generates server-side. Direct
+// upload would shave 1–2 seconds off a large upload but it doubles the
+// surface area on the mobile (signing, progress, complete callback, retry
+// after partial failure). When v1 ships and we see real upload pain in
+// telemetry, we can revisit.
+//
+// Validation (matches UploadTreatmentImageRequest):
+//   - mimes:  jpg, jpeg, png, webp
+//   - max:    5120 KB (5 MB)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TreatmentImageAsset {
+  uri: string
+  mimeType?: string | null
+  fileName?: string | null
+  fileSize?: number | null
+}
+
+export async function uploadTreatmentImage(
+  patientId: string,
+  treatmentId: string,
+  asset: TreatmentImageAsset
+): Promise<ApiTreatmentImage> {
+  requireOnline()
+
+  // React Native's FormData accepts the {uri, name, type} shape for files —
+  // it's a non-standard but universally-supported extension. The cast to
+  // `any` is needed because the DOM FormData typings don't model it.
+  const form = new FormData()
+  const inferredType = asset.mimeType ?? guessMimeFromUri(asset.uri) ?? 'image/jpeg'
+  const inferredName = asset.fileName ?? buildDefaultFileName(inferredType)
+  form.append('image', {
+    uri: asset.uri,
+    name: inferredName,
+    type: inferredType,
+  } as unknown as Blob)
+
+  const r = await client.post<ApiResponse<ApiTreatmentImage>>(
+    `/patients/${patientId}/treatments/${treatmentId}/images`,
+    form,
+    {
+      headers: {
+        // CRITICAL: must be `undefined`, not the literal string
+        // 'multipart/form-data'. Axios on React Native does not auto-append
+        // the boundary when an explicit string Content-Type is supplied,
+        // and the backend will reject the body with "missing file" / 400.
+        // Setting to undefined lets the underlying XHR adapter detect the
+        // FormData payload and emit `multipart/form-data; boundary=...`
+        // with the correct boundary the platform generates.
+        'Content-Type': undefined,
+      },
+      // Larger window than the default 20s so a slow phone network on a 4 MB
+      // photo doesn't time out before reaching the server.
+      timeout: 60_000,
+    }
+  )
+  return r.data.data
+}
+
+export async function deleteTreatmentImage(
+  patientId: string,
+  treatmentId: string,
+  imageId: string
+): Promise<void> {
+  requireOnline()
+  await client.delete(
+    `/patients/${patientId}/treatments/${treatmentId}/images/${imageId}`
+  )
+}
+
+function guessMimeFromUri(uri: string): string | null {
+  const m = uri.match(/\.(jpg|jpeg|png|webp|heic|heif)(?:\?|$)/i)
+  if (!m) return null
+  const ext = m[1].toLowerCase()
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+  if (ext === 'png') return 'image/png'
+  if (ext === 'webp') return 'image/webp'
+  // iOS sometimes hands back HEIC/HEIF URIs from the camera roll. The
+  // image picker is configured to deliver JPEGs but if a callsite skips
+  // that conversion we keep going and let the backend reject if needed.
+  if (ext === 'heic' || ext === 'heif') return 'image/heic'
+  return null
+}
+
+function buildDefaultFileName(mime: string): string {
+  const ext =
+    mime === 'image/png' ? 'png' :
+    mime === 'image/webp' ? 'webp' :
+    mime === 'image/heic' ? 'heic' :
+    'jpg'
+  // Suffix with timestamp so concurrent uploads from one device don't
+  // collide on the backend's filename de-dup logic.
+  return `treatment-${Date.now()}.${ext}`
+}
+
+// Resolve the best display URL on a treatment image, preferring preview →
+// thumbnail → full. Used by the gallery so a freshly-uploaded image
+// (which has no preview/thumbnail yet) still renders via the full URL.
+export function resolveTreatmentImageUrl(
+  image: ApiTreatmentImage,
+  kind: 'thumbnail' | 'preview' | 'full' = 'preview'
+): string | null {
+  if (image.scan_status === 'rejected') return null
+  if (kind === 'thumbnail') {
+    return image.thumbnail_url ?? image.preview_url ?? image.url ?? null
+  }
+  if (kind === 'preview') {
+    return image.preview_url ?? image.url ?? image.thumbnail_url ?? null
+  }
+  return image.url ?? image.preview_url ?? image.thumbnail_url ?? null
 }

@@ -33,6 +33,7 @@ import { useColors, type Colors } from '../../lib/useColors'
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
 import { login as loginApi } from '../../api/auth'
+import { isApiError } from '../../api/client'
 import type { AuthStackParams } from '../../navigation'
 
 type Nav = NativeStackNavigationProp<AuthStackParams, 'Login'>
@@ -69,8 +70,16 @@ export default function LoginScreen() {
       setSession(user, tokens)
       toast.success(t('login.success'))
     },
-    onError: () => {
-      toast.error(t('login.errors.loginFailed'))
+    onError: (err) => {
+      // Surface the backend's specific reason when present — e.g. a blocked or
+      // deleted account comes back as a 422 with an `email` field error
+      // (api.auth.account_inactive). Fall back to the generic message
+      // otherwise. The backend already localizes these.
+      const fieldMsg =
+        isApiError(err) && err.fieldErrors
+          ? Object.values(err.fieldErrors)[0]?.[0]
+          : undefined
+      toast.error(fieldMsg ?? t('login.errors.loginFailed'))
     },
   })
 

@@ -28,8 +28,18 @@ function interpolate(template: string, vars?: Record<string, string | number>): 
   })
 }
 
-export function I18nProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocale] = useState<Locale>(DEFAULT_LOCALE)
+export function I18nProvider({
+  children,
+  // Optional override for tests / Storybook so a wrapper can mount the
+  // provider already in a target language. Production code ignores this
+  // and uses DEFAULT_LOCALE; the in-app language switcher then bumps it
+  // via setLocale at runtime.
+  defaultLocale,
+}: {
+  children: React.ReactNode
+  defaultLocale?: Locale
+}) {
+  const [locale, setLocale] = useState<Locale>(defaultLocale ?? DEFAULT_LOCALE)
 
   const dict = translations[locale] as Dict
   const t = useCallback(

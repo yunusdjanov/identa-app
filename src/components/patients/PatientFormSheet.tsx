@@ -8,8 +8,17 @@ import InputCard from '../ui/InputCard'
 import Button from '../ui/Button'
 import Icon from '../ui/Icon'
 import DateWheelPicker from '../ui/DateWheelPicker'
+import PatientAvatar from '../ui/PatientAvatar'
+import { ImagePickerSheet, type PickedAsset } from '../gallery'
 import { useToast } from '../ui/Toast'
-import { getPatient, createPatient, updatePatient, listCategories } from '../../api/patients'
+import {
+  getPatient,
+  createPatient,
+  updatePatient,
+  listCategories,
+  uploadPatientPhoto,
+  deletePatientPhoto,
+} from '../../api/patients'
 import { useI18n } from '../../i18n'
 import { toIntlLocale } from '../../lib/format'
 import type { Locale } from '../../constants'
@@ -17,7 +26,7 @@ import { radius, spacing, font, typography } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import { isOfflineError } from '../../lib/offlineGuard'
 import { applyPhoneInput, formatStoredPhone } from '../../lib/phoneFormat'
-import type { ApiPatient, ApiPatientCategory } from '../../types'
+import type { ApiPatient } from '../../types'
 
 interface Props {
   visible: boolean
@@ -27,6 +36,10 @@ interface Props {
 }
 
 type Gender = 'male' | 'female' | null
+
+// Mirrors the backend phone rule (StorePatientRequest): a leading `+` then
+// 9–15 digits. `applyPhoneInput(...).raw` produces exactly this shape.
+const PHONE_RE = /^\+\d{9,15}$/
 
 // Unified create + edit sheet. When patientId is provided, loads the patient
 // and pre-fills the form; otherwise opens blank for a new patient.
@@ -49,9 +62,17 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
   const [allergies, setAllergies] = useState('')
   const [medications, setMedications] = useState('')
   const [history, setHistory] = useState('')
-  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
+  // The backend stores a single category per patient (`category_id`), matching
+  // the web. Single-select, not multi.
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [dobPickerVisible, setDobPickerVisible] = useState(false)
+
+  // Photo: a newly-picked local asset (not yet uploaded), or a flag that the
+  // user removed the existing photo. Uploaded after the patient row is saved.
+  const [photoPickerOpen, setPhotoPickerOpen] = useState(false)
+  const [localPhoto, setLocalPhoto] = useState<PickedAsset | null>(null)
+  const [photoRemoved, setPhotoRemoved] = useState(false)
 
   // Available categories
   const categoriesQuery = useQuery({
@@ -63,9 +84,7 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
   const allCategories = categoriesQuery.data ?? []
 
   const toggleCategory = (id: string) => {
-    setSelectedCategoryIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    )
+    setSelectedCategoryId((prev) => (prev === id ? null : id))
   }
 
   // Load patient when editing
@@ -93,7 +112,7 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
         setAllergies(p.allergies ?? '')
         setMedications(p.current_medications ?? '')
         setHistory(p.medical_history ?? '')
-        setSelectedCategoryIds((p.categories ?? []).map((c) => c.id))
+        setSelectedCategoryId((p.categories ?? [])[0]?.id ?? null)
       }
     } else {
       setName('')
@@ -105,15 +124,27 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
       setAllergies('')
       setMedications('')
       setHistory('')
-      setSelectedCategoryIds([])
+      setSelectedCategoryId(null)
     }
     setSubmitted(false)
+    setLocalPhoto(null)
+    setPhotoRemoved(false)
   }, [visible, isEdit, patientQuery.data])
 
-  const nameError = submitted && !name.trim() ? t('patients.form.errorNameRequired') : null
-  const phoneError = submitted && !phone.trim() ? t('patients.form.errorPhoneRequired') : null
+  // Backend StorePatientRequest: full_name min:3, phone/secondary_phone must
+  // match /^\+\d{9,15}$/. Validate client-side so the user gets an inline
+  // error instead of a raw 422.
+  const phoneRaw = applyPhoneInput(phone).raw
+  const secondaryPhoneRaw = secondaryPhone.trim() ? applyPhoneInput(secondaryPhone).raw : ''
+  const nameError = submitted && name.trim().length < 3 ? t('patients.form.errorNameRequired') : null
+  const phoneError =
+    submitted && !PHONE_RE.test(phoneRaw) ? t('patients.form.errorPhoneRequired') : null
+  const secondaryPhoneError =
+    submitted && secondaryPhoneRaw !== '' && !PHONE_RE.test(secondaryPhoneRaw)
+      ? t('patients.form.errorPhoneRequired')
+      : null
 
-  const buildPayload = (): Partial<ApiPatient> => ({
+  const buildPayload = (): Partial<ApiPatient> & { category_id: string | null } => ({
     full_name: name.trim(),
     // Persist the raw E.164-ish form (`+998901234567`) so the backend
     // doesn't store spaces — matching and search behave better against
@@ -127,16 +158,46 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
     allergies: allergies.trim() || undefined,
     current_medications: medications.trim() || undefined,
     medical_history: history.trim() || undefined,
-    categories: selectedCategoryIds
-      .map((id) => allCategories.find((c) => c.id === id))
-      .filter(Boolean) as ApiPatientCategory[],
+    // Backend reads a single `category_id` (PatientService::syncCategory);
+    // sending the `categories` array would be silently ignored. null clears it.
+    category_id: selectedCategoryId,
   })
 
+  const existingPhotoUrl =
+    patientQuery.data?.photo_thumbnail_url ?? patientQuery.data?.photo_url ?? null
+  const photoPreviewUri = localPhoto?.uri ?? (photoRemoved ? null : existingPhotoUrl)
+
   const mutation = useMutation({
-    mutationFn: () =>
-      isEdit ? updatePatient(patientId!, buildPayload()) : createPatient(buildPayload()),
-    onSuccess: () => {
-      toast.success(isEdit ? t('patients.form.savedEdit') : t('patients.form.savedCreate'))
+    mutationFn: async () => {
+      const saved = isEdit
+        ? await updatePatient(patientId!, buildPayload())
+        : await createPatient(buildPayload())
+      // Photo side-effects run after the patient row exists. A photo failure
+      // doesn't fail the whole save (the patient is still persisted) — we
+      // surface a warning toast instead.
+      let photoFailed = false
+      try {
+        if (localPhoto) {
+          await uploadPatientPhoto(saved.id, {
+            uri: localPhoto.uri,
+            mimeType: localPhoto.mimeType ?? null,
+            fileName: localPhoto.fileName ?? null,
+            fileSize: localPhoto.fileSize ?? null,
+          })
+        } else if (photoRemoved && existingPhotoUrl) {
+          await deletePatientPhoto(saved.id)
+        }
+      } catch (e) {
+        if (!isOfflineError(e)) photoFailed = true
+      }
+      return { photoFailed }
+    },
+    onSuccess: ({ photoFailed }) => {
+      if (photoFailed) {
+        toast.warning(t('gallery.uploadFailedTryAgain'))
+      } else {
+        toast.success(isEdit ? t('patients.form.savedEdit') : t('patients.form.savedCreate'))
+      }
       queryClient.invalidateQueries({ queryKey: ['patients'] })
       onSaved?.()
       onClose()
@@ -147,9 +208,28 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
     },
   })
 
+  const onPickedPhoto = (assets: PickedAsset[]) => {
+    const first = assets[0]
+    if (!first) return
+    setLocalPhoto(first)
+    setPhotoRemoved(false)
+  }
+
+  const onRemovePhoto = () => {
+    Haptics.selectionAsync()
+    if (localPhoto) {
+      setLocalPhoto(null)
+    } else {
+      setPhotoRemoved(true)
+    }
+  }
+
   const handleSubmit = () => {
     setSubmitted(true)
-    if (!name.trim() || !phone.trim()) {
+    const validName = name.trim().length >= 3
+    const validPhone = PHONE_RE.test(phoneRaw)
+    const validSecondary = secondaryPhoneRaw === '' || PHONE_RE.test(secondaryPhoneRaw)
+    if (!validName || !validPhone || !validSecondary) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
       return
     }
@@ -162,6 +242,29 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
       onClose={onClose}
       title={isEdit ? t('patients.form.editTitle') : t('patients.form.createTitle')}
     >
+      {/* Photo */}
+      <View style={styles.photoSection}>
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync()
+            setPhotoPickerOpen(true)
+          }}
+          style={styles.photoTap}
+          accessibilityRole="button"
+          accessibilityLabel={t('patients.form.removePhoto')}
+        >
+          <PatientAvatar name={name || '?'} size={88} uri={photoPreviewUri} />
+          <View style={styles.photoBadge}>
+            <Icon name="camera" size={14} color="#FFFFFF" />
+          </View>
+        </Pressable>
+        {photoPreviewUri ? (
+          <Pressable onPress={onRemovePhoto} hitSlop={8}>
+            <Text style={styles.photoRemove}>{t('patients.form.removePhoto')}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
       {/* Basic info */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>{t('patients.form.sections.basic')}</Text>
@@ -173,7 +276,7 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
             onChangeText={setName}
             placeholder={t('patients.form.namePlaceholder')}
             autoCapitalize="words"
-            maxLength={120}
+            maxLength={255}
             error={Boolean(nameError)}
           />
         </Field>
@@ -201,6 +304,7 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
             placeholder={t('patients.form.phonePlaceholder')}
             keyboardType="phone-pad"
             maxLength={17}
+            error={Boolean(secondaryPhoneError)}
           />
         </Field>
 
@@ -267,7 +371,7 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
           <Text style={styles.sectionTitle}>{t('patients.form.sections.categories')}</Text>
           <View style={styles.categoryRow}>
             {allCategories.map((cat) => {
-              const active = selectedCategoryIds.includes(cat.id)
+              const active = selectedCategoryId === cat.id
               return (
                 <Pressable
                   key={cat.id}
@@ -310,7 +414,7 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
             style={styles.textarea}
             multiline
             numberOfLines={3}
-            maxLength={500}
+            maxLength={255}
           />
         </View>
       </View>
@@ -325,6 +429,7 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
             value={allergies}
             onChangeText={setAllergies}
             placeholder={t('patients.form.allergiesPlaceholder')}
+            maxLength={40}
           />
         </Field>
 
@@ -334,6 +439,7 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
             value={medications}
             onChangeText={setMedications}
             placeholder={t('patients.form.medicationsPlaceholder')}
+            maxLength={120}
           />
         </Field>
 
@@ -347,15 +453,15 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
               style={styles.textarea}
               multiline
               numberOfLines={3}
-              maxLength={1000}
+              maxLength={300}
             />
             <Text
               style={[
                 styles.charCounter,
-                history.length >= 950 && styles.charCounterWarn,
+                history.length >= 280 && styles.charCounterWarn,
               ]}
             >
-              {history.length}/1000
+              {history.length}/300
             </Text>
           </View>
         </Field>
@@ -383,6 +489,13 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
         value={dob || null}
         onClose={() => setDobPickerVisible(false)}
         onConfirm={(d) => setDob(d)}
+      />
+
+      <ImagePickerSheet
+        visible={photoPickerOpen}
+        onClose={() => setPhotoPickerOpen(false)}
+        onPicked={onPickedPhoto}
+        maxSelection={1}
       />
     </BottomSheet>
   )
@@ -442,6 +555,32 @@ function GenderChip({
 
 function makeStyles(c: Colors) {
   return StyleSheet.create({
+    photoSection: {
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: spacing.md,
+    },
+    photoTap: {
+      position: 'relative',
+    },
+    photoBadge: {
+      position: 'absolute',
+      right: -2,
+      bottom: -2,
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: c.brand as string,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: c.background as string,
+    },
+    photoRemove: {
+      ...typography.footnote,
+      color: c.danger as string,
+      fontFamily: font('600'),
+    },
     section: {
       gap: spacing.md,
     },

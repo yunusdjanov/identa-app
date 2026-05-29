@@ -75,7 +75,10 @@ export default function PatientListScreen() {
     queryFn: () =>
       listPatients({
         search: debouncedSearch.trim() || undefined,
-        category_id: categoryId === 'all' ? undefined : categoryId,
+        category_id: categoryId === 'all' || categoryId === 'archived' ? undefined : categoryId,
+        // The "archived" chip switches the list to archived-only so the user
+        // can find and restore a previously archived patient.
+        archived: categoryId === 'archived' ? true : undefined,
         per_page: 100,
       }),
     enabled: canViewPatients,
@@ -196,6 +199,15 @@ export default function PatientListScreen() {
                 value={search}
                 onChangeText={setSearch}
                 placeholder={t('patients.searchPlaceholder')}
+                // Spin while either the debounce is still pending (user typed
+                // but query hasn't fired) or the query itself is in flight.
+                // Without this the screen feels static during the 250ms
+                // debounce + ~300ms network round-trip and users assume the
+                // search did nothing.
+                loading={
+                  (search.trim() !== debouncedSearch.trim()) ||
+                  (isFiltering && listQuery.isFetching)
+                }
               />
             </View>
             {(categoriesQuery.data?.length ?? 0) > 0 ? (

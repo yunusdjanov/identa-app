@@ -74,7 +74,15 @@ export const createAssistant = async (payload: AssistantPayload): Promise<ApiAss
     MOCK_TEAM = [...MOCK_TEAM, newOne]
     return mockDelay(newOne, 500)
   }
-  return client.post<ApiResponse<ApiAssistant>>('/team/assistants', payload).then((r) => r.data.data)
+  // Backend StoreAssistantRequest requires `password` to be `confirmed`, so
+  // it needs a matching `password_confirmation`. The mobile form has a single
+  // password field, so mirror it here.
+  return client
+    .post<ApiResponse<ApiAssistant>>('/team/assistants', {
+      ...payload,
+      password_confirmation: payload.password,
+    })
+    .then((r) => r.data.data)
 }
 
 export const updateAssistant = async (id: string, payload: AssistantPayload): Promise<ApiAssistant> => {
@@ -110,6 +118,22 @@ export const updateAssistantStatus = async (
   return client
     .patch<ApiResponse<ApiAssistant>>(`/team/assistants/${id}/status`, { status })
     .then((r) => r.data.data)
+}
+
+// Reset an assistant's password — backend `POST /team/assistants/{id}/reset-password`
+// requires `new_password` + matching `new_password_confirmation` (min 8).
+export const resetAssistantPassword = async (
+  id: string,
+  newPassword: string
+): Promise<void> => {
+  if (USE_MOCK) {
+    if (newPassword.length < 8) throw new Error('Password too short')
+    return mockDelay(undefined, 500)
+  }
+  await client.post(`/team/assistants/${id}/reset-password`, {
+    new_password: newPassword,
+    new_password_confirmation: newPassword,
+  })
 }
 
 export const deleteAssistant = async (id: string): Promise<void> => {

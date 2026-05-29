@@ -138,6 +138,14 @@ export const register = async (payload: RegisterPayload): Promise<ApiUser> => {
   return response.data.data
 }
 
+// Resend the email-verification link to the signed-in user. Backend:
+// `POST /auth/email/verification-notification` (auth:sanctum) — the bearer
+// token identifies the recipient, so no body is needed.
+export const resendEmailVerification = async (): Promise<void> => {
+  if (USE_MOCK) return mockDelay(undefined, 600)
+  await client.post('/auth/email/verification-notification')
+}
+
 export const requestPasswordReset = async (email: string) => {
   if (USE_MOCK) {
     if (!email) throw new Error('Email required')

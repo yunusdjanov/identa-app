@@ -5,6 +5,7 @@ import * as Haptics from 'expo-haptics'
 
 import BottomSheet from '../ui/BottomSheet'
 import InputCard from '../ui/InputCard'
+import PasswordInput from '../ui/PasswordInput'
 import Button from '../ui/Button'
 import Icon from '../ui/Icon'
 import PatientAvatar from '../ui/PatientAvatar'
@@ -15,8 +16,11 @@ import {
   listAssistants,
   createAssistant,
   updateAssistant,
+  updateAssistantStatus,
+  resetAssistantPassword,
   deleteAssistant,
 } from '../../api/team'
+import { validatePassword } from '../../lib/validation'
 import { useI18n } from '../../i18n'
 import type { TFunction } from '../../i18n/helpers'
 import { radius, spacing, typography, font } from '../../constants/theme'
@@ -40,7 +44,10 @@ const ALL_PERMISSIONS = [
   'payments.manage',
 ] as const
 
-type Mode = { type: 'list' } | { type: 'form'; editingId: string | null }
+type Mode =
+  | { type: 'list' }
+  | { type: 'form'; editingId: string | null }
+  | { type: 'resetPassword'; id: string; name: string }
 
 export default function TeamManagementSheet({ visible, onClose }: Props) {
   const { t } = useI18n()
@@ -57,6 +64,11 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [permissions, setPermissions] = useState<string[]>([])
+
+  // Reset-password form state (separate `resetPassword` mode).
+  const [resetPw, setResetPw] = useState('')
+  const [resetPwConfirm, setResetPwConfirm] = useState('')
+  const [resetSubmitted, setResetSubmitted] = useState(false)
 
   const listQuery = useQuery({
     queryKey: ['team', 'list'],
@@ -165,6 +177,69 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
     },
   })
 
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: 'active' | 'blocked' }) =>
+      updateAssistantStatus(id, status),
+    onSuccess: (_data, { status }) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      toast.success(
+        t(status === 'blocked' ? 'settings.teamSheet.blocked' : 'settings.teamSheet.unblocked')
+      )
+      refetch()
+    },
+    onError: (err) => {
+      if (isOfflineError(err)) return
+      toast.error(t('settings.teamSheet.failed'))
+    },
+  })
+
+  const onToggleStatus = (m: ApiAssistant) => {
+    const next = m.account_status === 'blocked' ? 'active' : 'blocked'
+    statusMutation.mutate({ id: m.id, status: next })
+  }
+
+  const openResetPassword = (m: ApiAssistant) => {
+    Haptics.selectionAsync()
+    setResetPw('')
+    setResetPwConfirm('')
+    setResetSubmitted(false)
+    setMode({ type: 'resetPassword', id: m.id, name: m.name })
+  }
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: ({ id, newPassword }: { id: string; newPassword: string }) =>
+      resetAssistantPassword(id, newPassword),
+    onSuccess: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      toast.success(t('settings.teamSheet.resetPasswordDone'))
+      setMode({ type: 'list' })
+      setResetPw('')
+      setResetPwConfirm('')
+    },
+    onError: (err) => {
+      if (isOfflineError(err)) return
+      toast.error(t('settings.teamSheet.failed'))
+    },
+  })
+
+  const resetPwError =
+    resetSubmitted && validatePassword(resetPw, { required: true })
+      ? t(`register.errors.${validatePassword(resetPw, { required: true })}`)
+      : null
+  const resetPwMismatch =
+    resetSubmitted && resetPwConfirm !== resetPw ? t('settings.passwordSheet.mismatch') : null
+
+  const handleResetSubmit = () => {
+    setResetSubmitted(true)
+    if (validatePassword(resetPw, { required: true }) || resetPwConfirm !== resetPw) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+      return
+    }
+    if (mode.type === 'resetPassword') {
+      resetPasswordMutation.mutate({ id: mode.id, newPassword: resetPw })
+    }
+  }
+
   const onDelete = (m: ApiAssistant) => {
     Alert.alert(t('settings.teamSheet.deleteConfirm'), t('settings.teamSheet.deleteConfirmSub'), [
       { text: t('common.cancel'), style: 'cancel' },
@@ -181,6 +256,7 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
 
   const isEditing = mode.type === 'form' && mode.editingId !== null
   const isFormMode = mode.type === 'form'
+  const isResetMode = mode.type === 'resetPassword'
 
   const canSubmit =
     name.trim().length > 0 &&
@@ -203,14 +279,60 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
       visible={visible}
       onClose={onClose}
       title={
-        isFormMode
-          ? isEditing
-            ? t('settings.teamSheet.editTitle')
-            : t('settings.teamSheet.createTitle')
-          : t('settings.teamSheet.title')
+        isResetMode
+          ? t('settings.teamSheet.resetPasswordTitle')
+          : isFormMode
+            ? isEditing
+              ? t('settings.teamSheet.editTitle')
+              : t('settings.teamSheet.createTitle')
+            : t('settings.teamSheet.title')
       }
     >
-      {isFormMode ? (
+      {isResetMode ? (
+        <>
+          <Text style={styles.resetSubtitle}>
+            {mode.type === 'resetPassword' ? mode.name : ''}
+          </Text>
+          <Field label={t('settings.passwordSheet.newLabel')}>
+            <PasswordInput
+              value={resetPw}
+              onChangeText={setResetPw}
+              placeholder={t('settings.passwordSheet.newPlaceholder')}
+              error={resetPwError}
+            />
+          </Field>
+          <Field label={t('settings.passwordSheet.confirmLabel')}>
+            <PasswordInput
+              value={resetPwConfirm}
+              onChangeText={setResetPwConfirm}
+              placeholder={t('settings.passwordSheet.confirmPlaceholder')}
+              error={resetPwMismatch}
+            />
+          </Field>
+          <View style={styles.formActions}>
+            <Button
+              title={t('common.cancel')}
+              variant="secondary"
+              size="md"
+              fullWidth
+              onPress={() => setMode({ type: 'list' })}
+              style={{ flex: 1 }}
+            />
+            <Button
+              title={
+                resetPasswordMutation.isPending
+                  ? t('settings.teamSheet.saving')
+                  : t('settings.teamSheet.resetPassword')
+              }
+              size="md"
+              fullWidth
+              loading={resetPasswordMutation.isPending}
+              onPress={handleResetSubmit}
+              style={{ flex: 1 }}
+            />
+          </View>
+        </>
+      ) : isFormMode ? (
         <>
           <Field label={t('settings.teamSheet.name')}>
             <InputCard
@@ -340,6 +462,8 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
                     member={m}
                     onEdit={() => openEdit(m)}
                     onDelete={() => onDelete(m)}
+                    onToggleStatus={() => onToggleStatus(m)}
+                    onResetPassword={() => openResetPassword(m)}
                     t={t}
                   />
                   {idx < members.length - 1 ? <View style={styles.separator} /> : null}
@@ -357,11 +481,15 @@ function MemberRow({
   member,
   onEdit,
   onDelete,
+  onToggleStatus,
+  onResetPassword,
   t,
 }: {
   member: ApiAssistant
   onEdit: () => void
   onDelete: () => void
+  onToggleStatus: () => void
+  onResetPassword: () => void
   t: TFunction
 }) {
   const c = useColors()
@@ -369,14 +497,22 @@ function MemberRow({
   const lastLoginLabel = member.last_login_at
     ? formatLastLogin(new Date(member.last_login_at), t)
     : t('settings.teamSheet.lastLoginNever')
+  const isBlocked = member.account_status === 'blocked'
 
   return (
     <View style={styles.memberRow}>
       <PatientAvatar name={member.name} size={42} />
       <View style={styles.memberBody}>
-        <Text style={styles.memberName} numberOfLines={1}>
-          {member.name}
-        </Text>
+        <View style={styles.memberNameRow}>
+          <Text style={styles.memberName} numberOfLines={1}>
+            {member.name}
+          </Text>
+          {isBlocked ? (
+            <View style={styles.blockedBadge}>
+              <Text style={styles.blockedBadgeText}>{t('settings.teamSheet.status.blocked')}</Text>
+            </View>
+          ) : null}
+        </View>
         <Text style={styles.memberEmail} numberOfLines={1}>
           {member.email}
         </Text>
@@ -385,6 +521,32 @@ function MemberRow({
         </Text>
       </View>
       <View style={styles.memberActions}>
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync()
+            onToggleStatus()
+          }}
+          hitSlop={8}
+          style={styles.iconBtn}
+          accessibilityLabel={t(isBlocked ? 'settings.teamSheet.unblock' : 'settings.teamSheet.block')}
+        >
+          <Icon
+            name={isBlocked ? 'lock-open-outline' : 'ban-outline'}
+            size={18}
+            color={isBlocked ? (c.success as string) : (c.labelSecondary as string)}
+          />
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync()
+            onResetPassword()
+          }}
+          hitSlop={8}
+          style={styles.iconBtn}
+          accessibilityLabel={t('settings.teamSheet.resetPassword')}
+        >
+          <Icon name="key-outline" size={18} color={c.labelSecondary as string} />
+        </Pressable>
         <Pressable onPress={onEdit} hitSlop={8} style={styles.iconBtn}>
           <Icon name="create-outline" size={18} color={c.brand as string} />
         </Pressable>
@@ -436,6 +598,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function makeStyles(c: Colors) {
   return StyleSheet.create({
     field: { gap: 6 },
+    resetSubtitle: {
+      ...typography.footnote,
+      color: c.labelSecondary,
+      marginBottom: spacing.sm,
+      marginLeft: 4,
+    },
     fieldLabel: {
       fontFamily: font('700'),
       fontSize: 11,
@@ -507,9 +675,29 @@ function makeStyles(c: Colors) {
       gap: 12,
     },
     memberBody: { flex: 1, gap: 2 },
+    memberNameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
     memberName: {
       ...typography.bodyEmphasized,
       color: c.label,
+      flexShrink: 1,
+    },
+    blockedBadge: {
+      backgroundColor: c.danger as string,
+      borderRadius: 6,
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+    },
+    blockedBadgeText: {
+      fontFamily: font('700'),
+      fontSize: 9,
+      fontWeight: '700',
+      color: '#FFFFFF',
+      textTransform: 'uppercase',
+      letterSpacing: 0.3,
     },
     memberEmail: {
       ...typography.footnote,

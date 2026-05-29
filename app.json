@@ -4,7 +4,7 @@
     "slug": "identa",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/brand/identa-full.png",
+    "icon": "./assets/brand/identa-icon.png",
     "userInterfaceStyle": "automatic",
     "scheme": "identa",
     "newArchEnabled": true,
@@ -37,7 +37,7 @@
       "package": "uz.identa.mobile",
       "versionCode": 1,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/brand/identa-full.png",
+        "foregroundImage": "./assets/brand/identa-icon.png",
         "backgroundColor": "#F0FAF8"
       },
       "edgeToEdgeEnabled": true,
@@ -99,23 +99,10 @@
           "color": "#0F766E",
           "sounds": []
         }
-      ],
-      [
-        "@sentry/react-native/expo",
-        {
-          "organization": "REPLACE_WITH_SENTRY_ORG_SLUG",
-          "project": "identa-mobile",
-          "url": "https://sentry.io/"
-        }
       ]
     ],
     "runtimeVersion": {
       "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/REPLACE_AFTER_EAS_UPDATE_CONFIGURE",
-      "fallbackToCacheTimeout": 0,
-      "checkAutomatically": "ON_LOAD"
     },
     "extra": {
       "eas": {}

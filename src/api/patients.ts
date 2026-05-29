@@ -226,7 +226,11 @@ export const getPatientOverview = async (id: string): Promise<ApiPatientOverview
     .then((r) => r.data.data)
 }
 
-export const createPatient = async (payload: Partial<ApiPatient>): Promise<ApiPatient> => {
+// `category_id` (single, nullable) is the write shape the backend expects for
+// category assignment — the `categories` array on ApiPatient is read-only.
+export const createPatient = async (
+  payload: Partial<ApiPatient> & { category_id?: string | null }
+): Promise<ApiPatient> => {
   requireOnline()
   if (USE_MOCK) {
     if (!payload.full_name?.trim() || !payload.phone?.trim()) {
@@ -254,7 +258,10 @@ export const createPatient = async (payload: Partial<ApiPatient>): Promise<ApiPa
   return client.post<ApiResponse<ApiPatient>>('/patients', payload).then((r) => r.data.data)
 }
 
-export const updatePatient = async (id: string, payload: Partial<ApiPatient>): Promise<ApiPatient> => {
+export const updatePatient = async (
+  id: string,
+  payload: Partial<ApiPatient> & { category_id?: string | null }
+): Promise<ApiPatient> => {
   requireOnline()
   if (USE_MOCK) {
     return mockDelay(
@@ -277,6 +284,88 @@ export const updatePatient = async (id: string, payload: Partial<ApiPatient>): P
     )
   }
   return client.put<ApiResponse<ApiPatient>>(`/patients/${id}`, payload).then((r) => r.data.data)
+}
+
+// Archive (soft-delete) a patient — backend `DELETE /patients/{id}`. The
+// patient drops out of the default list (which filters archived out) and can
+// be restored later. Not a hard delete; use the force endpoint for that.
+export const archivePatient = async (id: string): Promise<void> => {
+  requireOnline()
+  if (USE_MOCK) {
+    const all = getMockPatients()
+    const found = all.find((p) => p.id === id)
+    if (found) found.is_archived = true
+    return mockDelay(undefined, 400)
+  }
+  await client.delete(`/patients/${id}`)
+}
+
+// Restore an archived patient — backend `POST /patients/{id}/restore`.
+export const restorePatient = async (id: string): Promise<ApiPatient> => {
+  requireOnline()
+  if (USE_MOCK) {
+    const all = getMockPatients()
+    const found = all.find((p) => p.id === id)
+    if (found) found.is_archived = false
+    if (!found) throw new Error('Patient not found')
+    return mockDelay({ ...found, is_archived: false }, 400)
+  }
+  return client
+    .post<ApiResponse<ApiPatient>>(`/patients/${id}/restore`)
+    .then((r) => r.data.data)
+}
+
+export interface PatientPhotoAsset {
+  uri: string
+  mimeType?: string | null
+  fileName?: string | null
+  fileSize?: number | null
+}
+
+// Upload a patient profile photo — backend `POST /patients/{id}/photo`
+// (multipart, field `photo`; jpg/jpeg/png/webp, max 5 MB). Returns the updated
+// patient. The photo enters `pending` scan status server-side until moderated.
+export const uploadPatientPhoto = async (
+  id: string,
+  asset: PatientPhotoAsset
+): Promise<ApiPatient> => {
+  requireOnline()
+  if (USE_MOCK) {
+    const found = getMockPatients().find((p) => p.id === id)
+    const base = found ?? makeMockPatient(0)
+    return mockDelay({ ...base, id, photo_url: asset.uri, photo_thumbnail_url: asset.uri }, 600)
+  }
+  const form = new FormData()
+  const type = asset.mimeType ?? guessPhotoMime(asset.uri) ?? 'image/jpeg'
+  const name = asset.fileName ?? `patient-photo-${Date.now()}.${photoExt(type)}`
+  form.append('photo', { uri: asset.uri, name, type } as unknown as Blob)
+  const r = await client.post<ApiResponse<ApiPatient>>(`/patients/${id}/photo`, form, {
+    headers: {
+      // Must be undefined (not the literal string) so the RN XHR adapter sets
+      // the multipart boundary itself — see uploadTreatmentImage for the full
+      // story.
+      'Content-Type': undefined,
+    },
+    timeout: 60_000,
+  })
+  return r.data.data
+}
+
+export const deletePatientPhoto = async (id: string): Promise<void> => {
+  requireOnline()
+  if (USE_MOCK) return mockDelay(undefined, 400)
+  await client.delete(`/patients/${id}/photo`)
+}
+
+function guessPhotoMime(uri: string): string | null {
+  const m = uri.match(/\.(jpg|jpeg|png|webp)(?:\?|$)/i)
+  if (!m) return null
+  const e = m[1]!.toLowerCase()
+  return e === 'png' ? 'image/png' : e === 'webp' ? 'image/webp' : 'image/jpeg'
+}
+
+function photoExt(mime: string): string {
+  return mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'
 }
 
 export const listCategories = async (): Promise<ApiPatientCategory[]> => {

@@ -1,11 +1,13 @@
 import React from 'react'
-import { View, Text, StyleSheet, ViewStyle, StyleProp } from 'react-native'
+import { View, Text, Image, StyleSheet, ViewStyle, ImageStyle, StyleProp } from 'react-native'
 import { font } from '../../constants/theme'
 
 interface Props {
   name: string
   size?: number
   style?: StyleProp<ViewStyle>
+  // When provided, render the photo instead of the initials fallback.
+  uri?: string | null
 }
 
 // Pastel palette deterministically chosen from name. Keeps avatars
@@ -38,9 +40,18 @@ function initialsFrom(name: string): string {
   return (first + last).toUpperCase()
 }
 
-export default function PatientAvatar({ name, size = 40, style }: Props) {
+export default function PatientAvatar({ name, size = 40, style, uri }: Props) {
   const initials = initialsFrom(name)
   const palette = PALETTE[hashCode(name) % PALETTE.length]
+
+  if (uri) {
+    return (
+      <Image
+        source={{ uri }}
+        style={[{ width: size, height: size, borderRadius: size / 2 }, style as StyleProp<ImageStyle>]}
+      />
+    )
+  }
 
   return (
     <View

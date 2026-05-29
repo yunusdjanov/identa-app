@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { View, TextInput, StyleSheet, Pressable, TextInputProps } from 'react-native'
+import { View, TextInput, StyleSheet, Pressable, ActivityIndicator, TextInputProps } from 'react-native'
 import Icon from './Icon'
 import { radius, typography, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
@@ -7,9 +7,13 @@ import { useColors, type Colors } from '../../lib/useColors'
 interface Props extends Omit<TextInputProps, 'style'> {
   value: string
   onChangeText: (v: string) => void
+  // When true, replaces the trailing clear button with a small spinner so the
+  // user sees that the search-as-you-type request is in flight (otherwise the
+  // 250ms debounce + network round-trip feels like "search did nothing").
+  loading?: boolean
 }
 
-export default function SearchBar({ value, onChangeText, placeholder, ...rest }: Props) {
+export default function SearchBar({ value, onChangeText, placeholder, loading, ...rest }: Props) {
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const [focused, setFocused] = useState(false)
@@ -31,8 +35,16 @@ export default function SearchBar({ value, onChangeText, placeholder, ...rest }:
         clearButtonMode="while-editing"
         {...rest}
       />
-      {value.length > 0 ? (
-        <Pressable onPress={() => onChangeText('')} hitSlop={10}>
+      {loading ? (
+        <ActivityIndicator size="small" color={c.labelSecondary as string} testID="searchbar-spinner" />
+      ) : value.length > 0 ? (
+        <Pressable
+          onPress={() => onChangeText('')}
+          hitSlop={10}
+          testID="searchbar-clear"
+          accessibilityRole="button"
+          accessibilityLabel="Clear search"
+        >
           <Icon name="close-circle" size={18} color={c.labelTertiary as string} />
         </Pressable>
       ) : null}

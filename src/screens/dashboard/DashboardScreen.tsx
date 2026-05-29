@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 
 import DashboardHeader from '../../components/dashboard/DashboardHeader'
+import EmailVerificationBanner from '../../components/dashboard/EmailVerificationBanner'
 import TodayHeroCard from '../../components/dashboard/TodayHeroCard'
 import FinanceCard from '../../components/dashboard/FinanceCard'
 import AppointmentRow from '../../components/dashboard/AppointmentRow'
@@ -83,22 +84,34 @@ export default function DashboardScreen() {
   const isLoading = query.isLoading && !data
   const isRefreshing = query.isFetching && Boolean(data)
 
+  // All of today's still-open (scheduled) appointments, sorted by start time.
+  // We DON'T filter out past start times here — a scheduled appointment whose
+  // time has passed without being marked completed/cancelled is exactly what
+  // the dentist needs to see and action (run the swipe → mark completed flow).
+  // Previously this list filtered `mins >= nowMinutes`, which made every
+  // morning appointment vanish by lunch and surfaced a misleading
+  // "all completed" empty state even when nothing had actually been completed.
   const upcoming = useMemo(() => {
     if (!data) return [] as DashboardAppointmentView[]
-    const now = new Date()
-    const nowMinutes = now.getHours() * 60 + now.getMinutes()
     return data.today_appointments
       .filter((a) => a.status === 'scheduled')
       .map((a) => ({ a, mins: toMinutes(a.start_time) }))
-      .filter(({ mins }) => mins >= nowMinutes)
       .sort((x, y) => x.mins - y.mins)
       .map(({ a }) => a)
   }, [data])
 
-  const todayCount = data?.today_appointments.filter((a) => a.status === 'scheduled').length ?? 0
+  const todayCount = upcoming.length
   const visibleUpcoming = upcoming.slice(0, MAX_UPCOMING)
   const hiddenCount = Math.max(0, todayCount - visibleUpcoming.length)
-  const nextAppointment = upcoming[0] ?? null
+  // Hero card's "next" badge wants the first FUTURE appointment specifically —
+  // labeling a past-due slot as "next" would be misleading. Falls back to the
+  // earliest scheduled slot when nothing is left in the future today (so the
+  // hero still has something to point at on a busy-but-overdue afternoon).
+  const nextAppointment = useMemo(() => {
+    if (upcoming.length === 0) return null
+    const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes()
+    return upcoming.find((a) => toMinutes(a.start_time) >= nowMinutes) ?? upcoming[0]
+  }, [upcoming])
 
   const revenueParts = data ? formatCurrencyParts(data.revenue_this_month, locale) : null
   const debtParts = data ? formatCurrencyParts(data.outstanding_debt_total, locale) : null
@@ -217,6 +230,8 @@ export default function DashboardScreen() {
           }
         >
           <DashboardHeader />
+
+          <EmailVerificationBanner />
 
           {isLoading ? (
             <LoadingState />

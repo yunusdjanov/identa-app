@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react'
-import { View, Text, StyleSheet, Pressable, TextInput } from 'react-native'
+import { View, Text, StyleSheet, Pressable, TextInput, Alert } from 'react-native'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 
@@ -14,6 +14,7 @@ import type { TFunction } from '../../i18n/helpers'
 import { useAuthStore } from '../../stores/auth'
 import { canManage } from '../../lib/permissions'
 import { recordPayment } from '../../api/treatments'
+import { deletePayment } from '../../api/payments'
 import { formatCurrencyParts, formatDayMonth, fromLocalDateKey, toIntlLocale } from '../../lib/format'
 import type { Locale } from '../../constants'
 import { radius, spacing, typography, font } from '../../constants/theme'
@@ -27,9 +28,15 @@ interface Props {
   treatment: ApiTreatment | null
   onClose: () => void
   onUpdated?: (updated: ApiTreatment) => void
+  // When provided, an "Edit" button appears in the sheet that hands the
+  // treatment off to a parent-controlled edit flow (typically opening
+  // TreatmentEditSheet for full field/teeth/photo editing). The parent is
+  // responsible for closing this sheet before opening the edit one — we
+  // pass through the treatment so the edit sheet can hydrate immediately.
+  onEditRequested?: (treatment: ApiTreatment) => void
 }
 
-export default function TreatmentDetailSheet({ visible, treatment, onClose, onUpdated }: Props) {
+export default function TreatmentDetailSheet({ visible, treatment, onClose, onUpdated, onEditRequested }: Props) {
   const { t, locale } = useI18n()
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
@@ -37,6 +44,11 @@ export default function TreatmentDetailSheet({ visible, treatment, onClose, onUp
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const canManagePayments = canManage(user, 'payments')
+  // Editing a treatment is a patients-management action (it modifies the
+  // clinical record, not just the payment ledger). An assistant with only
+  // payments.manage can record/delete payments here but cannot rewrite the
+  // treatment itself — the Edit button must respect that boundary.
+  const canManagePatients = canManage(user, 'patients')
 
   const [recordMode, setRecordMode] = useState(false)
   const [amountText, setAmountText] = useState('')
@@ -53,6 +65,27 @@ export default function TreatmentDetailSheet({ visible, treatment, onClose, onUp
       setError(null)
     }
   }, [visible])
+
+  const deleteMutation = useMutation({
+    mutationFn: (paymentId: string) => deletePayment(paymentId),
+    onSuccess: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      toast.success(t('payments.treatment.deleted'))
+      // Invalidate everything the deleted payment could have touched so
+      // patient balances / treatment payments / dashboard finances all
+      // refresh together. The TreatmentDetailSheet itself reads from the
+      // parent's `treatment` prop, so the parent's invalidation triggers
+      // a re-render with the updated payments[] array.
+      queryClient.invalidateQueries({ queryKey: ['treatments'] })
+      queryClient.invalidateQueries({ queryKey: ['patients', 'overview'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+    onError: (err) => {
+      if (isOfflineError(err)) return
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+      toast.error(t('payments.treatment.deleteFailed'))
+    },
+  })
 
   const mutation = useMutation({
     mutationFn: (input: { amount: number; method: PaymentMethod; note: string }) =>
@@ -119,6 +152,11 @@ export default function TreatmentDetailSheet({ visible, treatment, onClose, onUp
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
       return
     }
+    // The backend rejects a treatment-linked quick-payment that exceeds the
+    // remaining balance (QuickPaymentService → amount_exceeds_balance, 422),
+    // and the mobile always sends treatment_id, so cap here to fail fast.
+    // Advances / credit are entered via the treatment form (paid > debt),
+    // not through this per-treatment payment flow.
     if (amount > balance) {
       setError(t('payments.treatment.exceedsBalance'))
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
@@ -146,6 +184,21 @@ export default function TreatmentDetailSheet({ visible, treatment, onClose, onUp
             {treatment.treatment_type}
           </Text>
         </View>
+        {onEditRequested && canManagePatients ? (
+          <Pressable
+            onPress={() => {
+              Haptics.selectionAsync()
+              onEditRequested(treatment)
+            }}
+            hitSlop={8}
+            style={styles.editBtn}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.edit')}
+          >
+            <Icon name="create-outline" size={18} color={c.brand as string} />
+            <Text style={styles.editBtnText}>{t('common.edit')}</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {/* Info rows */}
@@ -174,7 +227,7 @@ export default function TreatmentDetailSheet({ visible, treatment, onClose, onUp
         <MoneyRow
           label={t('payments.treatment.balance')}
           value={`${balanceParts.value} ${balanceParts.unit}`}
-          color={balance > 0 ? (c.danger as string) : (c.success as string)}
+          color={(balance > 0 ? c.danger : balance < 0 ? c.success : c.labelSecondary) as string}
           emphasize
         />
       </View>
@@ -185,9 +238,31 @@ export default function TreatmentDetailSheet({ visible, treatment, onClose, onUp
         balance={balance}
         locale={locale as Locale}
         t={t}
+        onDeletePayment={
+          canManagePayments
+            ? (paymentId) => {
+                Alert.alert(
+                  t('payments.treatment.deleteTitle'),
+                  t('payments.treatment.deleteBody'),
+                  [
+                    { text: t('common.cancel'), style: 'cancel' },
+                    {
+                      text: t('common.delete'),
+                      style: 'destructive',
+                      onPress: () => deleteMutation.mutate(paymentId),
+                    },
+                  ]
+                )
+              }
+            : undefined
+        }
+        deletingId={deleteMutation.isPending ? deleteMutation.variables ?? null : null}
       />
 
-      {/* Record payment */}
+      {/* Record payment — only when something is still owed. The backend
+          caps a treatment-linked quick-payment at the remaining balance, so
+          there's nothing to record once balance <= 0. Advances / credit are
+          entered via the treatment form instead. */}
       {canManagePayments && balance > 0 ? (
         recordMode ? (
           <View style={styles.recordCard}>
@@ -316,11 +391,18 @@ function PaymentHistorySection({
   balance,
   locale,
   t,
+  onDeletePayment,
+  deletingId,
 }: {
   payments: ApiTreatmentPayment[]
   balance: number
   locale: Locale
   t: TFunction
+  onDeletePayment?: (paymentId: string) => void
+  // Pinned to the id of the row that's mid-delete so we can show a spinner
+  // overlay and disable interactions on that one row only (instead of
+  // freezing the whole sheet during the network round-trip).
+  deletingId?: string | null
 }) {
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
@@ -333,7 +415,12 @@ function PaymentHistorySection({
     <View style={styles.historyWrap}>
       <View style={styles.historyHeader}>
         <Text style={styles.historyTitle}>{t('payments.treatment.history')}</Text>
-        {sorted.length > 0 && balance === 0 ? (
+        {balance < 0 ? (
+          <View style={styles.paidPill}>
+            <Icon name="wallet" size={11} color="#FFFFFF" />
+            <Text style={styles.paidPillText}>{t('payments.treatment.credit')}</Text>
+          </View>
+        ) : sorted.length > 0 && balance === 0 ? (
           <View style={styles.paidPill}>
             <Icon name="checkmark" size={11} color="#FFFFFF" />
             <Text style={styles.paidPillText}>{t('payments.treatment.paidInFull')}</Text>
@@ -352,31 +439,55 @@ function PaymentHistorySection({
         <View style={styles.historyList}>
           {sorted.map((p, i) => {
             const amountParts = formatCurrencyParts(p.amount, locale)
-            return (
-              <React.Fragment key={p.id}>
-                <View style={styles.historyRow}>
-                  <View style={styles.historyIconBubble}>
-                    <Icon name="checkmark" size={14} color={c.success as string} />
-                  </View>
-                  <View style={styles.historyTextWrap}>
-                    <Text style={styles.historyDate}>
-                      {formatPaymentDate(p.recorded_at, locale)}
-                    </Text>
-                    <Text style={styles.historyTime}>
-                      {formatPaymentTime(p.recorded_at, locale)}
-                    </Text>
-                  </View>
-                  <Text style={styles.historyAmount} numberOfLines={1}>
-                    +{amountParts.value}
-                    <Text style={styles.historyUnit}> {amountParts.unit}</Text>
+            const isDeleting = deletingId === p.id
+            const Row = (
+              <View style={[styles.historyRow, isDeleting && { opacity: 0.4 }]}>
+                <View style={styles.historyIconBubble}>
+                  <Icon name="checkmark" size={14} color={c.success as string} />
+                </View>
+                <View style={styles.historyTextWrap}>
+                  <Text style={styles.historyDate}>
+                    {formatPaymentDate(p.recorded_at, locale)}
+                  </Text>
+                  <Text style={styles.historyTime}>
+                    {formatPaymentTime(p.recorded_at, locale)}
                   </Text>
                 </View>
+                <Text style={styles.historyAmount} numberOfLines={1}>
+                  +{amountParts.value}
+                  <Text style={styles.historyUnit}> {amountParts.unit}</Text>
+                </Text>
+              </View>
+            )
+            return (
+              <React.Fragment key={p.id}>
+                {onDeletePayment ? (
+                  <Pressable
+                    // Long-press → delete confirmation. We use long-press
+                    // (not swipe-to-delete) here because the row is inside
+                    // a vertical ScrollView and a horizontal swipe gesture
+                    // would compete with scroll on tight screens.
+                    onLongPress={() => {
+                      if (isDeleting) return
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                      onDeletePayment(p.id)
+                    }}
+                    delayLongPress={400}
+                  >
+                    {Row}
+                  </Pressable>
+                ) : (
+                  Row
+                )}
                 {i < sorted.length - 1 ? <View style={styles.historySep} /> : null}
               </React.Fragment>
             )
           })}
         </View>
       )}
+      {onDeletePayment && sorted.length > 0 ? (
+        <Text style={styles.historyHint}>{t('payments.treatment.longPressHint')}</Text>
+      ) : null}
     </View>
   )
 }
@@ -512,6 +623,20 @@ function makeStyles(c: Colors) {
       ...typography.subhead,
       color: c.labelSecondary,
     },
+    editBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: c.brandLight,
+    },
+    editBtnText: {
+      fontFamily: font('600'),
+      fontSize: 12,
+      color: c.brand as string,
+    },
     infoCard: {
       backgroundColor: c.background,
       borderRadius: radius.xl,
@@ -619,6 +744,13 @@ function makeStyles(c: Colors) {
     historyEmptyText: {
       ...typography.subhead,
       color: c.labelTertiary,
+    },
+    historyHint: {
+      ...typography.caption2,
+      color: c.labelTertiary,
+      paddingHorizontal: 8,
+      paddingTop: 6,
+      textAlign: 'center',
     },
     historyList: {
       backgroundColor: c.background,

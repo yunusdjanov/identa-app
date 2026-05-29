@@ -142,6 +142,7 @@ interface ListParams {
   end_date?: string  // YYYY-MM-DD
   status?: string
   page?: number
+  per_page?: number
 }
 
 // Mock backend doesn't have a persistent store — appointments are generated
@@ -224,6 +225,10 @@ export const listAppointments = async (params?: ListParams): Promise<ApiListResp
   if (params?.end_date) realParams['filter[date_to]'] = params.end_date
   if (params?.status) realParams['filter[status]'] = params.status
   if (params?.page) realParams.page = params.page
+  // The day/week views want the entire range, but the backend paginates at 15
+  // by default — a busy day would silently drop appointments past the 15th.
+  // Request a high per_page (backend caps at 500) so the range comes back whole.
+  realParams.per_page = params?.per_page ?? 500
 
   return client
     .get<ApiListResponse<ApiAppointment>>('/appointments', { params: realParams })

@@ -16,6 +16,15 @@ interface UIState {
   patientFormId: string | null
   openPatientForm: (id?: string | null) => void
   closePatientForm: () => void
+
+  // Cross-component request to jump the AppointmentsScreen to a specific
+  // date. Set by the create flow so a newly-created appointment becomes
+  // visible immediately even when it lands in a week other than the one
+  // the user was viewing (e.g. created from Dashboard while on Sunday but
+  // for next Monday). AppointmentsScreen consumes + clears it.
+  pendingAppointmentsViewDate: string | null  // YYYY-MM-DD
+  requestAppointmentsViewDate: (date: string) => void
+  clearAppointmentsViewDate: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -32,4 +41,8 @@ export const useUIStore = create<UIState>((set) => ({
     set({ patientFormOpen: true, patientFormId: id ?? null }),
   closePatientForm: () =>
     set({ patientFormOpen: false, patientFormId: null }),
+
+  pendingAppointmentsViewDate: null,
+  requestAppointmentsViewDate: (date) => set({ pendingAppointmentsViewDate: date }),
+  clearAppointmentsViewDate: () => set({ pendingAppointmentsViewDate: null }),
 }))

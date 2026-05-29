@@ -18,11 +18,13 @@ import { registerDeviceToken } from '../api/devices'
 import LoginScreen from '../screens/auth/LoginScreen'
 import RegisterScreen from '../screens/auth/RegisterScreen'
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen'
+import ResetPasswordScreen from '../screens/auth/ResetPasswordScreen'
 
 // Main screens
 import DashboardScreen from '../screens/dashboard/DashboardScreen'
 import PatientListScreen from '../screens/patients/PatientListScreen'
 import PatientDetailScreen from '../screens/patients/PatientDetailScreen'
+import OdontogramScreen from '../screens/patients/OdontogramScreen'
 import AppointmentsScreen from '../screens/appointments/AppointmentsScreen'
 import PaymentsScreen from '../screens/payments/PaymentsScreen'
 import SettingsScreen from '../screens/settings/SettingsScreen'
@@ -31,6 +33,8 @@ export type AuthStackParams = {
   Login: undefined
   Register: undefined
   ForgotPassword: undefined
+  // Reached via the password-reset deep link (token + email in query string).
+  ResetPassword: { token?: string; email?: string }
 }
 
 export type MainTabParams = {
@@ -44,6 +48,7 @@ export type MainStackParams = {
   Tabs: undefined
   Settings: undefined
   PatientDetail: { id: string }
+  PatientOdontogram: { patientId: string; patientName?: string }
 }
 
 const AuthStack = createNativeStackNavigator<AuthStackParams>()
@@ -123,15 +128,22 @@ function MainNavigator() {
           options={{ presentation: 'modal' }}
         />
         <MainStack.Screen name="PatientDetail" component={PatientDetailScreen} />
+        <MainStack.Screen name="PatientOdontogram" component={OdontogramScreen} />
       </MainStack.Navigator>
 
       <AppointmentCreateSheet
         visible={createApptOpen}
         defaultDate={createApptDate ? fromLocalDateKey(createApptDate) : undefined}
         onClose={closeCreateAppt}
-        onCreated={() => {
+        onCreated={(created) => {
           queryClient.invalidateQueries({ queryKey: ['appointments'] })
           queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+          // Ask AppointmentsScreen to focus the new appointment's date. This
+          // prevents the common confusion where a user creates for tomorrow
+          // while viewing this week and assumes the create silently failed —
+          // AppointmentsScreen jumps to the matching week on next mount /
+          // immediately if already mounted.
+          useUIStore.getState().requestAppointmentsViewDate(created.appointment_date)
         }}
       />
 
@@ -150,7 +162,7 @@ function MainNavigator() {
 // Deep link map. URLs like `identa://patient/123` will open the matching
 // in-app screen. Useful for chat/email links, push notifications, and any
 // QR codes printed by the clinic.
-const linking: LinkingOptions<MainStackParams> = {
+const linking: LinkingOptions<MainStackParams & AuthStackParams> = {
   prefixes: ['identa://', 'https://identa.uz'],
   config: {
     screens: {
@@ -164,6 +176,10 @@ const linking: LinkingOptions<MainStackParams> = {
       },
       Settings: 'settings',
       PatientDetail: 'patient/:id',
+      PatientOdontogram: 'patient/:patientId/odontogram',
+      // Resolves while logged out (ResetPassword lives in AuthStack). Query
+      // params `?token=…&email=…` map onto the screen's route params.
+      ResetPassword: 'reset-password',
     },
   },
 }
@@ -180,6 +196,7 @@ export default function Navigation() {
           <AuthStack.Screen name="Login" component={LoginScreen} />
           <AuthStack.Screen name="Register" component={RegisterScreen} />
           <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+          <AuthStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
         </AuthStack.Navigator>
       )}
     </NavigationContainer>

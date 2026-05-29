@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import {
   View,
   Text,
@@ -42,6 +42,7 @@ import {
   formatDayMonth,
   formatMonthYear,
   formatWeekdayLong,
+  fromLocalDateKey,
   getWeekStart,
   isSameDay,
   toLocalDateKey,
@@ -73,6 +74,20 @@ export default function AppointmentsScreen() {
   const [detailVisible, setDetailVisible] = useState(false)
   const [editAppointment, setEditAppointment] = useState<ApiAppointment | null>(null)
   const [editVisible, setEditVisible] = useState(false)
+
+  // Pull pending-view-date requests from the UI store. The create-flow sets
+  // this when a new appointment lands on a date outside the currently visible
+  // week — we jump to it here so the user always sees what they just created.
+  const pendingViewDate = useUIStore((s) => s.pendingAppointmentsViewDate)
+  const clearViewDateRequest = useUIStore((s) => s.clearAppointmentsViewDate)
+
+  useEffect(() => {
+    if (!pendingViewDate) return
+    const target = fromLocalDateKey(pendingViewDate)
+    target.setHours(0, 0, 0, 0)
+    setSelectedDate(target)
+    clearViewDateRequest()
+  }, [pendingViewDate, clearViewDateRequest])
 
   const weekStart = useMemo(() => getWeekStart(selectedDate), [selectedDate])
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart])
@@ -191,6 +206,29 @@ export default function AppointmentsScreen() {
   // On failure we roll back by invalidating, which forces a refetch to the
   // server's truth.
   const onStatusChange = (id: string, status: ApiAppointment['status']) => {
+    // Capture the current appointment while flipping it optimistically — the
+    // backend requires the full payload (patient_id/date/times are all
+    // `required` on update), so a status-only PUT would 422.
+    // Locate the appointment in cache: the backend forbids editing an
+    // already-finalized appointment (completed/cancelled/no_show), so block
+    // the change here instead of letting the PUT 422. It also gives us the
+    // full payload the backend requires (patient_id/date/times all required).
+    let current: ApiAppointment | undefined
+    for (const [, data] of queryClient.getQueriesData<ApiListResponse<ApiAppointment>>({
+      queryKey: ['appointments'],
+    })) {
+      const found = data?.data?.find((a) => a.id === id)
+      if (found) {
+        current = found
+        break
+      }
+    }
+    if (current && current.status !== 'scheduled') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+      toast.error(t('appointments.edit.finalized'))
+      return
+    }
+
     queryClient.setQueriesData<ApiListResponse<ApiAppointment>>(
       { queryKey: ['appointments'] },
       (old) => {
@@ -204,7 +242,19 @@ export default function AppointmentsScreen() {
     if (status !== 'scheduled') {
       cancelAppointmentReminder(id).catch(() => {})
     }
-    updateAppointment(id, { status })
+    updateAppointment(
+      id,
+      current
+        ? {
+            patient_id: current.patient_id,
+            appointment_date: current.appointment_date,
+            start_time: current.start_time,
+            end_time: current.end_time,
+            status,
+            notes: current.notes,
+          }
+        : { status }
+    )
       .then(() => {
         queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       })

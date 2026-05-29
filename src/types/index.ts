@@ -130,31 +130,69 @@ export interface ApiPayment {
 
 export interface ApiTreatmentImage {
   id: string
-  url: string
-  thumbnail_url?: string
+  // The original URL may be null until backend background variant generation
+  // finishes (thumbnail / preview). UI falls back through preview → thumbnail
+  // → url. Mark all optional so consumers branch defensively.
+  url?: string | null
+  thumbnail_url?: string | null
+  preview_url?: string | null
+  mime_type?: string
+  file_size?: number
+  created_at?: string | null
+  thumbnail_ready?: boolean
+  preview_ready?: boolean
+  // Backend may quarantine images that fail content moderation. Only show
+  // `approved` (or null = legacy) to the user; pending/rejected stay hidden.
+  scan_status?: 'pending' | 'approved' | 'rejected' | null
 }
+
+export type ToothCondition =
+  | 'healthy'
+  | 'cavity'
+  | 'filling'
+  | 'crown'
+  | 'root_canal'
+  | 'extraction'
+  | 'implant'
 
 export interface ApiOdontogramEntry {
   id: string
   patient_id: string
   tooth_number: number
-  condition_type: 'healthy' | 'cavity' | 'filling' | 'crown' | 'root_canal' | 'extraction' | 'implant'
-  surface?: string
-  material?: string
-  severity?: string
+  condition_type: ToothCondition
+  surface?: string | null
+  material?: string | null
+  severity?: string | null
   condition_date: string
-  notes?: string
+  notes?: string | null
+  created_at?: string | null
   images?: ApiOdontogramEntryImage[]
 }
 
 export interface ApiOdontogramEntryImage {
   id: string
-  url: string
+  url?: string | null
+  thumbnail_url?: string | null
+  preview_url?: string | null
+}
+
+// Backend response shape for GET /patients/{id}/odontogram/summary. Each
+// `latest_conditions` row is the most recent entry for that tooth; if the
+// dentist replaces a filling with a crown over time, only the crown shows.
+// `history_count` is the lifetime count for that tooth (used to render the
+// small badge on the odontogram).
+export interface ApiOdontogramSummaryEntry {
+  tooth_number: number
+  condition_type: ToothCondition
+  history_count: number
+  condition_date: string
+  created_at?: string | null
 }
 
 export interface ApiOdontogramSummary {
-  patient_id: string
-  entries: ApiOdontogramEntry[]
+  total_entries: number
+  affected_teeth_count: number
+  latest_conditions: ApiOdontogramSummaryEntry[]
 }
 
 export interface ApiInvoice {

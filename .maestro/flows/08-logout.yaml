@@ -1,0 +1,40 @@
+# Verifies the logout flow:
+#   1. Log in.
+#   2. Open the Settings modal.
+#   3. Scroll to and tap "Chiqish" (Logout).
+#   4. Confirm the alert.
+#   5. Expect to land back on the Login screen.
+appId: uz.identa.mobile
+tags:
+  - auth
+  - smoke
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: _shared/login.yaml
+
+# The settings cog is typically in the top-right of Dashboard, or accessible
+# via a long-press or the Bottom Sheet "More". Tap whichever appears.
+- runFlow:
+    when:
+      visible: "Sozlamalar"
+    commands:
+      - tapOn: "Sozlamalar"
+
+# Scroll to find the Logout row.
+- scroll
+- scroll
+- scroll
+- tapOn: "Chiqish"
+
+# Confirmation alert.
+- extendedWaitUntil:
+    visible: "Chiqish"
+    timeout: 3000
+
+# After logout we should be back at the Login screen.
+- extendedWaitUntil:
+    visible: "Email"
+    timeout: 10000
+- assertVisible: "Kirish"

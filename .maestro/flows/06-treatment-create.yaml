@@ -1,0 +1,63 @@
+# Smoke-tests the treatment-create flow end-to-end against the live backend:
+#   1. Open the first patient.
+#   2. Open the "Qo'shish" (create entry) sheet.
+#   3. Fill the required type field, leave date/amounts as defaults.
+#   4. Submit; expect the success toast OR the row appearing in history.
+#
+# We intentionally skip photo upload here — a Maestro flow can't reliably
+# drive the system camera/library picker. The dedicated photo flow lives
+# in 07-treatment-photos.yaml (deferred until a stable picker hook lands).
+appId: uz.identa.mobile
+tags:
+  - navigation
+  - treatment
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: _shared/login.yaml
+- tapOn: "Bemorlar"
+- extendedWaitUntil:
+    visible: "Bemorlar"
+    timeout: 15000
+
+# Tap the first patient card. Same defensive pattern as the odontogram flow.
+- tapOn:
+    id: "PatientCard"
+    index: 0
+    optional: true
+- runFlow:
+    when:
+      notVisible: "Qo'shish"
+    commands:
+      - tapOn:
+          text: ".*"
+          index: 2
+
+- extendedWaitUntil:
+    visible: "Qo'shish"
+    timeout: 8000
+
+# Open the create-treatment sheet via the green "Qo'shish" chip next to
+# the history section header.
+- tapOn: "Qo'shish"
+- extendedWaitUntil:
+    visible: "Yangi yozuv"
+    timeout: 5000
+
+# Fill the minimum required field. The placeholder copy is "Masalan,
+# plomba qo'yish" in Uzbek; tapping it focuses the input.
+- tapOn: "Masalan, plomba qo'yish"
+- inputText: "E2E smoke entry"
+- hideKeyboard
+
+# Submit. Button label inside the create sheet is "Qo'shish" (different
+# Button instance from the section chip, but Maestro matches text).
+- tapOn:
+    text: "Qo'shish"
+    index: 1
+- extendedWaitUntil:
+    # Success toast OR the new entry rendering in the timeline counts as a
+    # passing test — whichever happens first.
+    visible: "Yozuv qo\\'shildi|E2E smoke entry"
+    timeout: 10000

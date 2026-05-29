@@ -147,6 +147,18 @@ client.interceptors.response.use(
       useAuthStore.getState().logout()
     }
 
+    // Account blocked/deleted mid-session: the backend returns 403 with
+    // `code: 'account_inactive'` (AuthController). Treat it like a session end
+    // — drop local state so the app falls back to login. Gated on the specific
+    // code so ordinary permission-denied 403s don't sign the user out.
+    if (
+      normalized.kind === 'forbidden' &&
+      (error.response?.data as { code?: string } | undefined)?.code === 'account_inactive'
+    ) {
+      const { useAuthStore } = require('../stores/auth') as typeof import('../stores/auth')
+      useAuthStore.getState().logout()
+    }
+
     // Report classes of error that deserve operator attention. We skip
     // network/timeout/offline (expected on bad mobile networks),
     // unauthorized (a session boundary, not a bug), validation (the user

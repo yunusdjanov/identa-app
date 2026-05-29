@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -8,10 +8,11 @@ import {
   StatusBar,
   ActivityIndicator,
   Linking,
+  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -19,20 +20,25 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import PatientAvatar from '../../components/ui/PatientAvatar'
 import FinanceCard from '../../components/dashboard/FinanceCard'
 import TreatmentHistoryRow from '../../components/payments/TreatmentHistoryRow'
+import TreatmentDetailSheet from '../../components/payments/TreatmentDetailSheet'
+import { TreatmentEditSheet } from '../../components/treatments'
 import Icon, { IconName } from '../../components/ui/Icon'
 import EmptyState from '../../components/ui/EmptyState'
+import Button from '../../components/ui/Button'
 import { useToast } from '../../components/ui/Toast'
 
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
 import { useUIStore } from '../../stores/ui'
 import { canManage } from '../../lib/permissions'
-import { getPatient, getPatientOverview } from '../../api/patients'
+import { isOfflineError } from '../../lib/offlineGuard'
+import { getPatient, getPatientOverview, archivePatient, restorePatient } from '../../api/patients'
 import { listTreatments } from '../../api/treatments'
 import { formatCurrencyParts } from '../../lib/format'
 import { radius, spacing, typography, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import type { MainStackParams } from '../../navigation'
+import type { ApiTreatment } from '../../types'
 
 type Route = RouteProp<MainStackParams, 'PatientDetail'>
 type Nav = NativeStackNavigationProp<MainStackParams, 'PatientDetail'>
@@ -72,6 +78,18 @@ export default function PatientDetailScreen() {
   const treatments = treatmentsQuery.data?.data ?? []
   const isLoading = patientQuery.isLoading && !patient
 
+  // Treatment sheets — split intentionally:
+  //   • Detail sheet: view treatment + record payment (focused on $ flow)
+  //   • Edit sheet:   change fields / teeth / photos (focused on records)
+  // Tapping a row opens detail; tapping "+" or "Edit" opens edit.
+  const [detailTreatment, setDetailTreatment] = useState<ApiTreatment | null>(null)
+  const [editState, setEditState] = useState<
+    | { mode: 'create' }
+    | { mode: 'edit'; treatment: ApiTreatment }
+    | null
+  >(null)
+  const canManageTreatments = canManage(user, 'patients')
+
   const onBack = () => {
     Haptics.selectionAsync()
     navigation.goBack()
@@ -93,6 +111,49 @@ export default function PatientDetailScreen() {
     if (!canManagePatient) return
     Haptics.selectionAsync()
     useUIStore.getState().openPatientForm(route.params.id)
+  }
+
+  const queryClient = useQueryClient()
+
+  const archiveMutation = useMutation({
+    mutationFn: () => archivePatient(route.params.id),
+    onSuccess: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      toast.success(t('patients.detail.archivedToast'))
+      queryClient.invalidateQueries({ queryKey: ['patients'] })
+      navigation.goBack()
+    },
+    onError: (err) => {
+      if (isOfflineError(err)) return
+      toast.error(t('patients.form.failed'))
+    },
+  })
+
+  const restoreMutation = useMutation({
+    mutationFn: () => restorePatient(route.params.id),
+    onSuccess: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      toast.success(t('patients.detail.restoredToast'))
+      queryClient.invalidateQueries({ queryKey: ['patients'] })
+    },
+    onError: (err) => {
+      if (isOfflineError(err)) return
+      toast.error(t('patients.form.failed'))
+    },
+  })
+
+  const onArchivePress = () => {
+    Alert.alert(t('patients.detail.archiveConfirm'), t('patients.detail.archiveConfirmSub'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('patients.detail.actions.archive'),
+        style: 'destructive',
+        onPress: () => {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+          archiveMutation.mutate()
+        },
+      },
+    ])
   }
 
   const debtParts = overview ? formatCurrencyParts(overview.total_debt, locale) : null
@@ -164,7 +225,11 @@ export default function PatientDetailScreen() {
         >
           {/* Hero */}
           <View style={styles.hero}>
-            <PatientAvatar name={patient.full_name} size={80} />
+            <PatientAvatar
+              name={patient.full_name}
+              size={80}
+              uri={patient.photo_thumbnail_url ?? patient.photo_url}
+            />
             <Text style={styles.heroName} numberOfLines={1}>
               {patient.full_name}
             </Text>
@@ -319,9 +384,48 @@ export default function PatientDetailScreen() {
             </View>
           ) : null}
 
+          {/* Odontogram quick-link */}
+          <Pressable
+            style={styles.odontogramLink}
+            onPress={() => {
+              Haptics.selectionAsync()
+              navigation.navigate('PatientOdontogram', {
+                patientId: route.params.id,
+                patientName: patient?.full_name,
+              })
+            }}
+            accessibilityRole="button"
+          >
+            <View style={styles.odontogramIconBubble}>
+              <Icon name="medical-outline" size={20} color={c.brand as string} />
+            </View>
+            <View style={styles.odontogramLinkText}>
+              <Text style={styles.odontogramLinkTitle}>{t('odontogram.open')}</Text>
+              <Text style={styles.odontogramLinkSub}>{t('odontogram.pickerHint')}</Text>
+            </View>
+            <Icon name="chevron-forward" size={18} color={c.labelTertiary as string} />
+          </Pressable>
+
           {/* Treatment history */}
           <View>
-            <Text style={styles.sectionTitle}>{t('patients.detail.sections.history')}</Text>
+            <View style={styles.historyHeader}>
+              <Text style={styles.sectionTitle}>{t('patients.detail.sections.history')}</Text>
+              {canManageTreatments ? (
+                <Pressable
+                  onPress={() => {
+                    Haptics.selectionAsync()
+                    setEditState({ mode: 'create' })
+                  }}
+                  hitSlop={8}
+                  style={styles.historyAddBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('treatment.create')}
+                >
+                  <Icon name="add" size={18} color={c.brand as string} />
+                  <Text style={styles.historyAddText}>{t('treatment.create')}</Text>
+                </Pressable>
+              ) : null}
+            </View>
             {treatments.length === 0 ? (
               <EmptyState
                 iconName="time-outline"
@@ -332,15 +436,64 @@ export default function PatientDetailScreen() {
               <View style={styles.historyList}>
                 {treatments.map((tr, idx) => (
                   <React.Fragment key={tr.id}>
-                    <TreatmentHistoryRow treatment={tr} />
+                    <TreatmentHistoryRow
+                      treatment={tr}
+                      onPress={() => setDetailTreatment(tr)}
+                    />
                     {idx < treatments.length - 1 ? <View style={styles.rowSep} /> : null}
                   </React.Fragment>
                 ))}
               </View>
             )}
           </View>
+
+          {/* Archive / restore — write action, gated by patients.manage. */}
+          {canManagePatient ? (
+            patient.is_archived ? (
+              <Button
+                title={t('patients.detail.actions.unarchive')}
+                variant="secondary"
+                size="lg"
+                fullWidth
+                loading={restoreMutation.isPending}
+                onPress={() => restoreMutation.mutate()}
+                style={{ marginTop: spacing.xl }}
+              />
+            ) : (
+              <Button
+                title={t('patients.detail.actions.archive')}
+                variant="destructive"
+                size="lg"
+                fullWidth
+                loading={archiveMutation.isPending}
+                onPress={onArchivePress}
+                style={{ marginTop: spacing.xl }}
+              />
+            )
+          ) : null}
         </ScrollView>
       </SafeAreaView>
+
+      <TreatmentDetailSheet
+        visible={detailTreatment !== null}
+        treatment={detailTreatment}
+        onClose={() => setDetailTreatment(null)}
+        onEditRequested={(tr) => {
+          // Close the detail (read+payment) sheet and open the edit
+          // (fields+teeth+photos) sheet for the same row. We defer the open
+          // by one frame so the dismiss animation can play before the new
+          // sheet slides in — otherwise the two backdrops stack and look glitchy.
+          setDetailTreatment(null)
+          setTimeout(() => setEditState({ mode: 'edit', treatment: tr }), 220)
+        }}
+      />
+
+      <TreatmentEditSheet
+        visible={editState !== null}
+        patientId={route.params.id}
+        treatment={editState?.mode === 'edit' ? editState.treatment : null}
+        onClose={() => setEditState(null)}
+      />
     </View>
   )
 }
@@ -619,6 +772,61 @@ function makeStyles(c: Colors) {
       shadowOpacity: 0.04,
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 2 },
+    },
+    historyHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingRight: 16,
+    },
+    odontogramLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+      marginHorizontal: 16,
+      backgroundColor: c.background,
+      borderRadius: radius.xl,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+      shadowColor: '#000',
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+    },
+    odontogramIconBubble: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: c.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    odontogramLinkText: {
+      flex: 1,
+    },
+    odontogramLinkTitle: {
+      ...typography.bodyEmphasized,
+      fontFamily: font('600'),
+      color: c.label,
+    },
+    odontogramLinkSub: {
+      ...typography.footnote,
+      color: c.labelSecondary as string,
+      marginTop: 2,
+    },
+    historyAddBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: c.brandLight,
+    },
+    historyAddText: {
+      fontFamily: font('600'),
+      fontSize: 12,
+      color: c.brand as string,
     },
     rowSep: {
       height: StyleSheet.hairlineWidth,

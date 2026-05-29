@@ -45,3 +45,40 @@ export const recordQuickPayment = async (
   )
   return response.data.data
 }
+
+// Delete a payment by id. Backend reverses the invoice's paid_amount and,
+// if the payment was linked to a treatment, the treatment's paid_amount
+// too — the caller just needs to invalidate `['treatments']` and
+// `['patients', 'overview']` to see fresh balances.
+//
+// Note: the web app uses this from the per-payment row's context menu;
+// mobile invokes it from a long-press on the payment history row inside
+// TreatmentDetailSheet.
+export const deletePayment = async (paymentId: string): Promise<void> => {
+  requireOnline()
+  await client.delete(`/payments/${paymentId}`)
+}
+
+// Update a payment (amount / method / date). The endpoint exists but mobile
+// v1 doesn't surface an edit UI — easier to delete and re-record than to
+// build another form sheet. Keeping the wrapper here so the endpoint is
+// discoverable for the next iteration without re-reading the backend
+// routes.
+export interface UpdatePaymentPayload {
+  amount: number
+  payment_method: PaymentMethod
+  payment_date: string
+  notes?: string | null
+}
+
+export const updatePayment = async (
+  paymentId: string,
+  payload: UpdatePaymentPayload
+): Promise<ApiPayment> => {
+  requireOnline()
+  const response = await client.put<ApiResponse<ApiPayment>>(
+    `/payments/${paymentId}`,
+    payload
+  )
+  return response.data.data
+}

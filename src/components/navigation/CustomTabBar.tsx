@@ -10,6 +10,8 @@ import { useToast } from '../ui/Toast'
 import { useI18n } from '../../i18n'
 import { useUIStore } from '../../stores/ui'
 import { useThemeStore } from '../../stores/theme'
+import { useAuthStore } from '../../stores/auth'
+import { canManage } from '../../lib/permissions'
 import { radius, shadows, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 
@@ -32,6 +34,14 @@ export default function CustomTabBar({ state, navigation, descriptors }: BottomT
   const effective = useThemeStore((s) => s.effective)
   const styles = useMemo(() => makeStyles(c, effective), [c, effective])
   const [sheetOpen, setSheetOpen] = useState(false)
+
+  // Gate the create FAB by permission + subscription. `canManage` already
+  // returns false for view-only assistants and for any user whose
+  // subscription is read_only, so this covers both dimensions.
+  const user = useAuthStore((s) => s.user)
+  const canAddPatient = canManage(user, 'patients')
+  const canNewAppointment = canManage(user, 'appointments')
+  const canCreate = canAddPatient || canNewAppointment
 
   const openTab = (name: string) => {
     Haptics.selectionAsync()
@@ -95,24 +105,27 @@ export default function CustomTabBar({ state, navigation, descriptors }: BottomT
           </View>
         </View>
 
-        {/* FAB */}
-        <Pressable
-          onPress={openFab}
-          style={({ pressed }) => [
-            styles.fabWrap,
-            { bottom: bottomPad + 18 },
-            pressed && { opacity: 0.92, transform: [{ scale: 0.96 }] },
-          ]}
-        >
-          <LinearGradient
-            colors={[c.brand, effective === 'dark' ? '#15B5A3' : '#0E9C8E']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.fab, shadows.lg]}
+        {/* FAB — hidden entirely when the user can create neither patients
+            nor appointments (view-only assistant or read_only subscription). */}
+        {canCreate ? (
+          <Pressable
+            onPress={openFab}
+            style={({ pressed }) => [
+              styles.fabWrap,
+              { bottom: bottomPad + 18 },
+              pressed && { opacity: 0.92, transform: [{ scale: 0.96 }] },
+            ]}
           >
-            <Icon name="add" size={30} color="#FFFFFF" />
-          </LinearGradient>
-        </Pressable>
+            <LinearGradient
+              colors={[c.brand, effective === 'dark' ? '#15B5A3' : '#0E9C8E']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.fab, shadows.lg]}
+            >
+              <Icon name="add" size={30} color="#FFFFFF" />
+            </LinearGradient>
+          </Pressable>
+        ) : null}
       </View>
 
       <CreateActionSheet
@@ -120,6 +133,8 @@ export default function CustomTabBar({ state, navigation, descriptors }: BottomT
         onClose={() => setSheetOpen(false)}
         onAddPatient={onAddPatient}
         onNewAppointment={onNewAppointment}
+        canAddPatient={canAddPatient}
+        canNewAppointment={canNewAppointment}
       />
     </>
   )
