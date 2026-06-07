@@ -1,5 +1,13 @@
 export const translations = {
   uz: {
+    analytics: {
+      title: 'Analitika',
+      subtitle: 'Klinikangiz koʻrsatkichlari',
+      loadFailed: 'Analitika yuklanmadi',
+      noBaseline: 'Taqqoslash uchun maʼlumot yoʻq',
+      range: { '7d': '7 kun', '30d': '30 kun', '180d': '6 oy', '365d': '12 oy', ytd: 'Yil boshidan' },
+      kpi: { revenue: 'Tushum', debt: 'Qarzdorlik', patients: 'Yangi bemorlar', completion: 'Bajarilish' },
+    },
     common: {
       save: 'Saqlash',
       cancel: 'Bekor qilish',
@@ -829,6 +837,14 @@ export const translations = {
     },
   },
   ru: {
+    analytics: {
+      title: 'Аналитика',
+      subtitle: 'Показатели вашей клиники',
+      loadFailed: 'Не удалось загрузить аналитику',
+      noBaseline: 'Нет данных для сравнения',
+      range: { '7d': '7 дней', '30d': '30 дней', '180d': '6 мес', '365d': '12 мес', ytd: 'С начала года' },
+      kpi: { revenue: 'Выручка', debt: 'Задолженность', patients: 'Новые пациенты', completion: 'Завершаемость' },
+    },
     common: {
       save: 'Сохранить',
       cancel: 'Отмена',
@@ -1654,6 +1670,14 @@ export const translations = {
     },
   },
   en: {
+    analytics: {
+      title: 'Analytics',
+      subtitle: 'Your clinic at a glance',
+      loadFailed: 'Failed to load analytics',
+      noBaseline: 'No baseline',
+      range: { '7d': '7 days', '30d': '30 days', '180d': '6 mo', '365d': '12 mo', ytd: 'Year to date' },
+      kpi: { revenue: 'Revenue', debt: 'Outstanding debt', patients: 'New patients', completion: 'Completion rate' },
+    },
     common: {
       save: 'Save',
       cancel: 'Cancel',

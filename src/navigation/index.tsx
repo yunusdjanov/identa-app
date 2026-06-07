@@ -28,6 +28,7 @@ import OdontogramScreen from '../screens/patients/OdontogramScreen'
 import AppointmentsScreen from '../screens/appointments/AppointmentsScreen'
 import PaymentsScreen from '../screens/payments/PaymentsScreen'
 import SettingsScreen from '../screens/settings/SettingsScreen'
+import AnalyticsScreen from '../screens/analytics/AnalyticsScreen'
 
 export type AuthStackParams = {
   Login: undefined
@@ -47,6 +48,7 @@ export type MainTabParams = {
 export type MainStackParams = {
   Tabs: undefined
   Settings: undefined
+  Analytics: undefined
   PatientDetail: { id: string }
   PatientOdontogram: { patientId: string; patientName?: string }
 }
@@ -130,6 +132,7 @@ function MainNavigator() {
         />
         <MainStack.Screen name="PatientDetail" component={PatientDetailScreen} />
         <MainStack.Screen name="PatientOdontogram" component={OdontogramScreen} />
+        <MainStack.Screen name="Analytics" component={AnalyticsScreen} />
       </MainStack.Navigator>
 
       <AppointmentCreateSheet

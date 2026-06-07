@@ -10,6 +10,7 @@ import Icon from '../ui/Icon'
 import LanguageSwitcher from '../ui/LanguageSwitcher'
 import { radius, typography, spacing, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
+import { canViewAnalytics } from '../../lib/permissions'
 import { formatLongDate, getGreetingKey } from '../../lib/format'
 import type { MainStackParams } from '../../navigation'
 
@@ -78,6 +79,19 @@ export default function DashboardHeader() {
         </View>
 
         <View style={styles.right}>
+          {canViewAnalytics(user) ? (
+            <Pressable
+              onPress={() => {
+                Haptics.selectionAsync()
+                navigation.navigate('Analytics')
+              }}
+              style={styles.iconBtn}
+              hitSlop={6}
+              accessibilityLabel={t('analytics.title')}
+            >
+              <Icon name="stats-chart-outline" size={20} color={c.label as string} />
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={() => {
               Haptics.selectionAsync()

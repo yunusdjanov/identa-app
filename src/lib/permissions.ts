@@ -49,3 +49,9 @@ export function canManage(user: ApiUser | null, module: PermissionModule): boole
   if (user.role === 'assistant') return hasAssistantPermission(user, module, 'manage')
   return false
 }
+
+// Analytics aggregates patients/appointments/payments — visible if ANY of those
+// view permissions is granted (dentist/admin always pass). Mirrors web.
+export function canViewAnalytics(user: ApiUser | null): boolean {
+  return canView(user, 'patients') || canView(user, 'appointments') || canView(user, 'payments')
+}
