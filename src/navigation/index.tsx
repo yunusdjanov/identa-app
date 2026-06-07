@@ -168,7 +168,7 @@ function MainNavigator() {
 // in-app screen. Useful for chat/email links, push notifications, and any
 // QR codes printed by the clinic.
 const linking: LinkingOptions<MainStackParams & AuthStackParams> = {
-  prefixes: ['identa://', 'https://identa.uz'],
+  prefixes: ['identa://', 'https://identa.uz', 'https://app.identa.uz'],
   config: {
     screens: {
       Tabs: {
@@ -180,6 +180,7 @@ const linking: LinkingOptions<MainStackParams & AuthStackParams> = {
         },
       },
       Settings: 'settings',
+      Analytics: 'analytics',
       PatientDetail: 'patient/:id',
       PatientOdontogram: 'patient/:patientId/odontogram',
       // Resolves while logged out (ResetPassword lives in AuthStack). Query
