@@ -1,5 +1,21 @@
 # Mobile ↔ Web — Parity Gap Report
 
+> **RE-BASELINE (post-commit `fe7419f`, 2026-06-05):** a large parity batch is now
+> committed. **Closed:** patient-detail parity (vitals, upcoming appts, force-
+> delete, photo-moderation gating), Dialog/type-to-confirm, inactive 6-month
+> filter, treatment date/image/comment caps, gender removal, plus this session's
+> permissions, calendar-correct age, debt-always-red, locale persistence,
+> payments sort tiebreak, DOB max.
+> **Still remaining:** BIG → Analytics screen · billing checkout · Google sign-in
+> (still a stub) + Connected Accounts (absent) · Staff audit-logs tab · PDF export.
+> Backend-blocked (still `USE_MOCK=true`): notification prefs · active sessions ·
+> push-device registration. Small → reason/notes `|` encoding · 1-year inactive
+> filter · phone normalization (web change) · currency format (device-verify).
+> Quality → EAS projectId · synthetic sparkline · deep-link host · dark mode.
+> The sections below are the original analysis (pre-commit) kept for reference.
+
+
+
 > Goal: bring **Identa Mobile** to 1:1 with the **current web app**. The mobile
 > app was built against an older web version (~70–75% match). This report
 > compares the **current web** (inventoried 2026-06-05) against **mobile now**,

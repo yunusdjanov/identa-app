@@ -75,26 +75,29 @@ export default function PatientListScreen() {
       listPatients({
         search: debouncedSearch.trim() || undefined,
         category_id:
-          categoryId === 'all' || categoryId === 'archived' || categoryId === 'inactive'
+          categoryId === 'all' ||
+          categoryId === 'archived' ||
+          categoryId === 'inactive' ||
+          categoryId === 'inactive_1y'
             ? undefined
             : categoryId,
         // The "archived" chip switches the list to archived-only so the user
         // can find and restore a previously archived patient.
         archived: categoryId === 'archived' ? true : undefined,
-        // The "inactive" chip surfaces patients with no visit in the last 6
-        // months (matches the web's retention-call list). Compute the cutoff
-        // date here so the backend filter is just `filter[inactive_before]`.
-        inactive_before:
-          categoryId === 'inactive'
-            ? (() => {
-                const d = new Date()
-                d.setMonth(d.getMonth() - 6)
-                const y = d.getFullYear()
-                const m = String(d.getMonth() + 1).padStart(2, '0')
-                const day = String(d.getDate()).padStart(2, '0')
-                return `${y}-${m}-${day}`
-              })()
-            : undefined,
+        // The "inactive" chips surface patients with no visit in the last 6
+        // months or 1 year (matches the web's two retention-call lists).
+        // Compute the cutoff so the backend filter is just `filter[inactive_before]`.
+        inactive_before: (() => {
+          const months =
+            categoryId === 'inactive' ? 6 : categoryId === 'inactive_1y' ? 12 : null
+          if (months == null) return undefined
+          const d = new Date()
+          d.setMonth(d.getMonth() - months)
+          const y = d.getFullYear()
+          const m = String(d.getMonth() + 1).padStart(2, '0')
+          const day = String(d.getDate()).padStart(2, '0')
+          return `${y}-${m}-${day}`
+        })(),
         per_page: 100,
       }),
     enabled: canViewPatients,

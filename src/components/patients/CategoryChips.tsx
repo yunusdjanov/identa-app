@@ -39,9 +39,14 @@ export default function CategoryChips({ categories, activeId, onSelect }: Props)
         onPress={() => handleSelect('archived')}
       />
       <Chip
-        label={t('patients.inactive')}
+        label={t('patients.inactive6m')}
         active={activeId === 'inactive'}
         onPress={() => handleSelect('inactive')}
+      />
+      <Chip
+        label={t('patients.inactive1y')}
+        active={activeId === 'inactive_1y'}
+        onPress={() => handleSelect('inactive_1y')}
       />
       {categories.map((cat) => (
         <Chip
