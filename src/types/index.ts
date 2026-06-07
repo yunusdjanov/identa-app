@@ -267,6 +267,26 @@ export interface ApiListResponse<T> {
   meta: { pagination: PaginationMeta }
 }
 
+// Audit log (Staff → Action logs). Mirrors web ApiAuditLogEntry.
+export interface ApiAuditActor {
+  id?: string
+  name?: string | null
+  role?: string | null
+}
+
+export interface ApiAuditLogEntry {
+  id: string
+  event_type: string
+  entity_type: string | null
+  entity_id: string | null
+  actor_role: string | null
+  actor: ApiAuditActor | null
+  ip_address: string | null
+  user_agent: string | null
+  metadata: Record<string, unknown> | null
+  created_at: string | null
+}
+
 export interface ApiResponse<T> {
   data: T
 }

@@ -29,6 +29,7 @@ import BillingSheet from '../../components/settings/BillingSheet'
 import HelpSheet from '../../components/settings/HelpSheet'
 import AppearanceSheet from '../../components/settings/AppearanceSheet'
 import SessionsSheet from '../../components/settings/SessionsSheet'
+import AuditLogsSheet from '../../components/settings/AuditLogsSheet'
 import Icon from '../../components/ui/Icon'
 import { useToast } from '../../components/ui/Toast'
 import { useDialog } from '../../components/ui/Dialog'
@@ -60,7 +61,7 @@ export default function SettingsScreen() {
 
   const isDentist = user?.role === 'dentist'
 
-  type ActiveSheet = 'profile' | 'password' | 'hours' | 'practice' | 'language' | 'appearance' | 'team' | 'notifications' | 'billing' | 'help' | 'sessions' | null
+  type ActiveSheet = 'profile' | 'password' | 'hours' | 'practice' | 'language' | 'appearance' | 'team' | 'audit' | 'notifications' | 'billing' | 'help' | 'sessions' | null
   const [activeSheet, setActiveSheet] = React.useState<ActiveSheet>(null)
   const closeSheet = () => setActiveSheet(null)
 
@@ -173,6 +174,13 @@ export default function SettingsScreen() {
                 iconBg="#CFFAFE"
                 label={t('settings.rows.team')}
                 onPress={() => setActiveSheet('team')}
+              />
+              <SettingsRow
+                iconName="document-text-outline"
+                iconColor="#7C3AED"
+                iconBg="#EDE9FE"
+                label={t('settings.rows.actionLogs')}
+                onPress={() => setActiveSheet('audit')}
               />
               <SettingsRow
                 iconName="card-outline"
@@ -298,6 +306,10 @@ export default function SettingsScreen() {
       />
       <SessionsSheet
         visible={activeSheet === 'sessions'}
+        onClose={closeSheet}
+      />
+      <AuditLogsSheet
+        visible={activeSheet === 'audit'}
         onClose={closeSheet}
       />
     </View>
