@@ -224,3 +224,77 @@ export function computeTopDebtors(
     .sort((a, b2) => b2.debt - a.debt)
     .slice(0, limit)
 }
+
+// --- Time-series buckets (for the trend sparklines) ---
+// Daily buckets for 7d/30d, monthly for 180d/365d/ytd (matches web
+// buildChartBuckets, minus the unused 90d weekly case). Labels are omitted —
+// the sparklines are axis-less, so we only need per-bucket match predicates.
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+function dayKeyOf(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+function monthKeyOf(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`
+}
+
+function bucketMatchers(
+  range: AnalyticsRange,
+  bounds: { start: Date; end: Date }
+): Array<(value: string | null | undefined) => boolean> {
+  const out: Array<(value: string | null | undefined) => boolean> = []
+  if (range === '7d' || range === '30d') {
+    const cursor = new Date(bounds.start)
+    while (cursor <= bounds.end) {
+      const k = dayKeyOf(cursor)
+      out.push((v) => {
+        const d = parseLocalDate(v)
+        return d !== null && dayKeyOf(d) === k
+      })
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    return out
+  }
+  const cursor = new Date(bounds.start.getFullYear(), bounds.start.getMonth(), 1)
+  const endMonth = new Date(bounds.end.getFullYear(), bounds.end.getMonth(), 1)
+  while (cursor <= endMonth) {
+    const k = monthKeyOf(cursor)
+    out.push((v) => {
+      const d = parseLocalDate(v)
+      return d !== null && monthKeyOf(d) === k
+    })
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+  return out
+}
+
+// Revenue (paid_amount) collected per bucket across the range. Feeds a sparkline.
+export function computeRevenueSeries(
+  treatments: readonly TreatmentLike[],
+  range: AnalyticsRange,
+  now: Date = new Date()
+): number[] {
+  const bounds = getRangeBounds(range, now)
+  return bucketMatchers(range, bounds).map((match) => {
+    let rev = 0
+    for (const tr of treatments) {
+      if (match(tr.treatment_date)) rev += Number(tr.paid_amount ?? 0)
+    }
+    return rev
+  })
+}
+
+// Cumulative new-patient count per bucket across the range (a growth curve).
+export function computePatientGrowthSeries(
+  patients: readonly PatientLike[],
+  range: AnalyticsRange,
+  now: Date = new Date()
+): number[] {
+  const bounds = getRangeBounds(range, now)
+  let cumulative = 0
+  return bucketMatchers(range, bounds).map((match) => {
+    cumulative += patients.filter((p) => match(p.created_at)).length
+    return cumulative
+  })
+}

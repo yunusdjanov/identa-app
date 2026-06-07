@@ -11,6 +11,8 @@ export const translations = {
       status: { scheduled: 'Rejalashtirilgan', completed: 'Bajarilgan', cancelled: 'Bekor qilingan', no_show: 'Kelmagan' },
       topDebtorsTitle: 'Eng katta qarzdorlar',
       topDebtorsEmpty: 'Qarzdorlar yoʻq',
+      revenueTrendTitle: 'Tushum dinamikasi',
+      patientGrowthTitle: 'Bemorlar oʻsishi',
     },
     common: {
       save: 'Saqlash',
@@ -852,6 +854,8 @@ export const translations = {
       status: { scheduled: 'Запланированы', completed: 'Завершены', cancelled: 'Отменены', no_show: 'Не пришли' },
       topDebtorsTitle: 'Крупнейшие должники',
       topDebtorsEmpty: 'Должников нет',
+      revenueTrendTitle: 'Динамика выручки',
+      patientGrowthTitle: 'Рост пациентов',
     },
     common: {
       save: 'Сохранить',
@@ -1689,6 +1693,8 @@ export const translations = {
       status: { scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled', no_show: 'No-show' },
       topDebtorsTitle: 'Top debtors',
       topDebtorsEmpty: 'No debtors',
+      revenueTrendTitle: 'Revenue trend',
+      patientGrowthTitle: 'Patient growth',
     },
     common: {
       save: 'Save',

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Dimensions } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigation } from '@react-navigation/native'
@@ -7,6 +7,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 
 import Icon from '../../components/ui/Icon'
 import EmptyState from '../../components/ui/EmptyState'
+import Sparkline from '../../components/ui/Sparkline'
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
 import { canView, canViewAnalytics } from '../../lib/permissions'
@@ -20,6 +21,8 @@ import {
   computeAnalyticsKpis,
   computeAppointmentStatusCounts,
   computeTopDebtors,
+  computeRevenueSeries,
+  computePatientGrowthSeries,
   type AnalyticsRange,
   type KpiValue,
 } from '../../lib/analytics'
@@ -36,6 +39,9 @@ const STATUS_COLOR: Record<(typeof STATUS_ORDER)[number], string> = {
   cancelled: '#94A3B8',
   no_show: '#F43F5E',
 }
+
+// Sparkline width = screen minus content padding (md*2) and card padding (md*2).
+const CHART_WIDTH = Dimensions.get('window').width - 72
 
 export default function AnalyticsScreen() {
   const { t, locale } = useI18n()
@@ -111,6 +117,14 @@ export default function AnalyticsScreen() {
   const topDebtors = useMemo(
     () => computeTopDebtors(treatmentsQuery.data?.data ?? [], range),
     [treatmentsQuery.data, range]
+  )
+  const revenueSeries = useMemo(
+    () => computeRevenueSeries(treatmentsQuery.data?.data ?? [], range),
+    [treatmentsQuery.data, range]
+  )
+  const growthSeries = useMemo(
+    () => computePatientGrowthSeries(patientsQuery.data?.data ?? [], range),
+    [patientsQuery.data, range]
   )
 
   return (
@@ -198,6 +212,38 @@ export default function AnalyticsScreen() {
               locked={!canAppointments}
             />
           </View>
+
+          {canPayments && revenueSeries.length >= 2 ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>{t('analytics.revenueTrendTitle')}</Text>
+              <View style={styles.chartCard}>
+                <Sparkline
+                  data={revenueSeries}
+                  width={CHART_WIDTH}
+                  height={72}
+                  strokeColor="#14B8A6"
+                  fillColor="#14B8A6"
+                  strokeWidth={2}
+                />
+              </View>
+            </View>
+          ) : null}
+
+          {canPatients && growthSeries.length >= 2 ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>{t('analytics.patientGrowthTitle')}</Text>
+              <View style={styles.chartCard}>
+                <Sparkline
+                  data={growthSeries}
+                  width={CHART_WIDTH}
+                  height={72}
+                  strokeColor="#3B82F6"
+                  fillColor="#3B82F6"
+                  strokeWidth={2}
+                />
+              </View>
+            </View>
+          ) : null}
 
           {canAppointments ? (
             <View style={styles.section}>
@@ -358,6 +404,14 @@ function makeStyles(c: Colors) {
       borderWidth: 1,
       borderColor: c.separator as string,
       paddingHorizontal: spacing.md,
+    },
+    chartCard: {
+      backgroundColor: c.background,
+      borderRadius: radius.xl,
+      borderWidth: 1,
+      borderColor: c.separator as string,
+      padding: spacing.md,
+      alignItems: 'center',
     },
     rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.separator as string },
     statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },

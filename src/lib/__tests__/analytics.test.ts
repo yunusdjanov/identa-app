@@ -7,6 +7,8 @@ import {
   computeAnalyticsKpis,
   computeAppointmentStatusCounts,
   computeTopDebtors,
+  computeRevenueSeries,
+  computePatientGrowthSeries,
 } from '../analytics'
 
 describe('computeDelta', () => {
@@ -144,5 +146,53 @@ describe('computeTopDebtors', () => {
       { patientId: 'A', name: 'Alice', debt: 1300 },
       { patientId: 'C', name: 'Carol', debt: 400 },
     ])
+  })
+})
+
+describe('time-series', () => {
+  const now = new Date(2026, 5, 15, 12, 0, 0)
+
+  it('computeRevenueSeries: one daily bucket per day in a 7d window', () => {
+    const s = computeRevenueSeries(
+      [
+        { treatment_date: '2026-06-10', paid_amount: 300 },
+        { treatment_date: '2026-06-15', paid_amount: 200 },
+        { treatment_date: '2026-05-01', paid_amount: 999 }, // out of 7d range
+      ],
+      '7d',
+      now
+    )
+    expect(s).toHaveLength(7) // Jun 9..15 inclusive
+    expect(s.reduce((a, b) => a + b, 0)).toBe(500)
+    expect(s[s.length - 1]).toBe(200) // today (Jun 15) is the last bucket
+  })
+
+  it('computePatientGrowthSeries: cumulative & non-decreasing', () => {
+    const g = computePatientGrowthSeries(
+      [
+        { created_at: '2026-06-10' },
+        { created_at: '2026-06-12' },
+        { created_at: '2026-05-01' }, // out of 7d range
+      ],
+      '7d',
+      now
+    )
+    expect(g).toHaveLength(7)
+    expect(g[g.length - 1]).toBe(2)
+    for (let i = 1; i < g.length; i++) {
+      expect(g[i]).toBeGreaterThanOrEqual(g[i - 1])
+    }
+  })
+
+  it('uses monthly buckets for long ranges (180d)', () => {
+    const s = computeRevenueSeries(
+      [{ treatment_date: '2026-06-05', paid_amount: 700 }],
+      '180d',
+      now
+    )
+    // ~7 monthly buckets (Dec..Jun); the current month (last) holds the payment.
+    expect(s.length).toBeGreaterThanOrEqual(6)
+    expect(s[s.length - 1]).toBe(700)
+    expect(s.reduce((a, b) => a + b, 0)).toBe(700)
   })
 })
