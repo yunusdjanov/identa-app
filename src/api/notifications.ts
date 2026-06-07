@@ -1,10 +1,10 @@
+import client from './client'
 import { requireOnline } from '../lib/offlineGuard'
 
-// HARDCODED MOCK: backend doesn't expose a notification-preferences
-// endpoint yet (no /settings/notifications route). UI ships with a local
-// store so the Notifications sheet stays functional; flip this to a
-// real call once the backend adds `GET/PUT /settings/notifications`.
-// Tracking issue: pending backend follow-up.
+// The backend route (GET/PUT /settings/notifications) now exists on the
+// `feat/mobile-backend-endpoints` branch. Keep USE_MOCK=true until that is
+// merged + deployed, then flip to false — the real call path below already
+// matches the deployed contract (envelope `{ data: NotificationPrefs }`).
 const USE_MOCK = true
 
 function mockDelay<T>(value: T, ms = 300): Promise<T> {
@@ -30,13 +30,21 @@ const DEFAULT_PREFS: NotificationPrefs = {
 let MOCK_PREFS: NotificationPrefs = { ...DEFAULT_PREFS }
 
 export const getNotificationPrefs = async (): Promise<NotificationPrefs> => {
-  return mockDelay({ ...MOCK_PREFS })
+  if (USE_MOCK) return mockDelay({ ...MOCK_PREFS })
+  return client
+    .get<{ data: NotificationPrefs }>('/settings/notifications')
+    .then((r) => r.data.data)
 }
 
 export const updateNotificationPrefs = async (
   prefs: Partial<NotificationPrefs>
 ): Promise<NotificationPrefs> => {
   requireOnline()
-  MOCK_PREFS = { ...MOCK_PREFS, ...prefs }
-  return mockDelay({ ...MOCK_PREFS }, 250)
+  if (USE_MOCK) {
+    MOCK_PREFS = { ...MOCK_PREFS, ...prefs }
+    return mockDelay({ ...MOCK_PREFS }, 250)
+  }
+  return client
+    .put<{ data: NotificationPrefs }>('/settings/notifications', prefs)
+    .then((r) => r.data.data)
 }

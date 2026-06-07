@@ -1,10 +1,9 @@
 import client from './client'
 
-// HARDCODED MOCK: backend doesn't expose a push-token registration
-// endpoint yet (no /devices/register route). Local reminders work fine
-// without server registration; remote push will need this endpoint to
-// route notifications to the right device. Flip once backend adds
-// `POST /devices/register` (or similar) plus a `devices` table.
+// The backend route (POST /devices/register + a `devices` table) now exists
+// on the `feat/mobile-backend-endpoints` branch and matches the real call
+// path below. Keep USE_MOCK=true until it is merged + deployed, then flip to
+// false to start persisting Expo push tokens server-side.
 const USE_MOCK = true
 
 interface RegisterDevicePayload {
