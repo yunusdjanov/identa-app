@@ -4,12 +4,27 @@ export type PermissionModule = 'patients' | 'appointments' | 'payments'
 export type PermissionAction = 'view' | 'manage'
 
 // Mirrors web `lib/auth/permissions.ts`.
-// - Dentist & admin: full access (subject to subscription).
+// - Dentist & admin: full access (subject to subscription + account status).
 // - Assistant: granular `assistant_permissions` array like ['patients.view', ...].
-// - Subscription `read_only` access mode forbids manage actions even for dentists.
+// - Subscription read-only forbids manage actions even for dentists; ADMINS are
+//   exempt (they never have a billable subscription) — matches web.
+// - A non-active account (blocked / soft-deleted) shows NO affordances.
 
 export function isSubscriptionReadOnly(user: ApiUser | null): boolean {
-  return user?.subscription?.access_mode === 'read_only'
+  // Admins are never read-only (web parity). Check both the explicit
+  // `is_read_only` flag and the `access_mode` enum so editing locks correctly
+  // regardless of which one the backend populates for the mobile payload.
+  if (user?.role === 'admin') return false
+  const sub = user?.subscription
+  return sub?.is_read_only === true || sub?.access_mode === 'read_only'
+}
+
+// A blocked/soft-deleted account (e.g. an assistant whose owner was blocked, or
+// a stale cached session) must not advertise view/manage actions. Backend
+// mutations stay guarded regardless; this keeps the UI honest. Matches web's
+// `hasPermission` account-status gate.
+function isAccountUsable(user: ApiUser): boolean {
+  return user.account_status === 'active'
 }
 
 function hasAssistantPermission(user: ApiUser, module: PermissionModule, action: PermissionAction): boolean {
@@ -21,14 +36,14 @@ function hasAssistantPermission(user: ApiUser, module: PermissionModule, action:
 }
 
 export function canView(user: ApiUser | null, module: PermissionModule): boolean {
-  if (!user) return false
+  if (!user || !isAccountUsable(user)) return false
   if (user.role === 'admin' || user.role === 'dentist') return true
   if (user.role === 'assistant') return hasAssistantPermission(user, module, 'view')
   return false
 }
 
 export function canManage(user: ApiUser | null, module: PermissionModule): boolean {
-  if (!user) return false
+  if (!user || !isAccountUsable(user)) return false
   if (isSubscriptionReadOnly(user)) return false
   if (user.role === 'admin' || user.role === 'dentist') return true
   if (user.role === 'assistant') return hasAssistantPermission(user, module, 'manage')

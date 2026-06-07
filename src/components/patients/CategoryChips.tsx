@@ -38,6 +38,11 @@ export default function CategoryChips({ categories, activeId, onSelect }: Props)
         active={activeId === 'archived'}
         onPress={() => handleSelect('archived')}
       />
+      <Chip
+        label={t('patients.inactive')}
+        active={activeId === 'inactive'}
+        onPress={() => handleSelect('inactive')}
+      />
       {categories.map((cat) => (
         <Chip
           key={cat.id}

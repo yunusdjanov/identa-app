@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { View, Text, StyleSheet, Pressable, Alert } from 'react-native'
+import { View, Text, StyleSheet, Pressable } from 'react-native'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 
@@ -11,6 +11,7 @@ import Icon from '../ui/Icon'
 import PatientAvatar from '../ui/PatientAvatar'
 import EmptyState from '../ui/EmptyState'
 import { useToast } from '../ui/Toast'
+import { useDialog } from '../ui/Dialog'
 
 import {
   listAssistants,
@@ -54,6 +55,7 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const toast = useToast()
+  const { confirm } = useDialog()
   const queryClient = useQueryClient()
 
   const [mode, setMode] = useState<Mode>({ type: 'list' })
@@ -240,18 +242,14 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
     }
   }
 
-  const onDelete = (m: ApiAssistant) => {
-    Alert.alert(t('settings.teamSheet.deleteConfirm'), t('settings.teamSheet.deleteConfirmSub'), [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: t('settings.teamSheet.delete'),
-        style: 'destructive',
-        onPress: () => {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-          deleteMutation.mutate(m.id)
-        },
-      },
-    ])
+  const onDelete = async (m: ApiAssistant) => {
+    const ok = await confirm({
+      title: t('settings.teamSheet.deleteConfirm'),
+      message: t('settings.teamSheet.deleteConfirmSub'),
+      confirmLabel: t('settings.teamSheet.delete'),
+      destructive: true,
+    })
+    if (ok) deleteMutation.mutate(m.id)
   }
 
   const isEditing = mode.type === 'form' && mode.editingId !== null

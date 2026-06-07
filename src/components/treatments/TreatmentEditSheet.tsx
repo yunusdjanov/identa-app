@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { View, Text, StyleSheet, Pressable, ScrollView, Alert } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 
@@ -9,6 +9,8 @@ import Icon from '../ui/Icon'
 import InputCard from '../ui/InputCard'
 import MonthCalendarPicker from '../ui/MonthCalendarPicker'
 import { useToast } from '../ui/Toast'
+import { useDialog } from '../ui/Dialog'
+import { useAuthStore } from '../../stores/auth'
 
 import { Odontogram } from '../odontogram'
 import {
@@ -37,10 +39,11 @@ import { radius, spacing, typography, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import type { ApiTreatment } from '../../types'
 
-// Maximum images per treatment — matches the web app's per-entry cap. The
-// backend's per-subscription image limit is enforced server-side; this is
-// just a UX guard so we don't queue uploads the server would reject.
-const MAX_PHOTOS = 10
+// Fallback maximum images per treatment when the subscription doesn't
+// advertise an `entry_image_limit`. The real cap comes from the user's
+// subscription (web reads the same field) so free-tier users see the right
+// quota instead of queueing uploads the backend would later reject.
+const FALLBACK_PHOTOS = 10
 
 interface LocalPhoto {
   localId: string
@@ -74,7 +77,13 @@ export default function TreatmentEditSheet({
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const toast = useToast()
+  const { confirm } = useDialog()
   const queryClient = useQueryClient()
+  // Subscription-driven photo cap so free-tier dentists see (e.g.) 3 instead
+  // of the absolute fallback of 10 — prevents queueing uploads the backend
+  // would later 422. Mirrors the web treatment-history-card.
+  const user = useAuthStore((s) => s.user)
+  const maxPhotos = user?.subscription?.entry_image_limit ?? FALLBACK_PHOTOS
 
   const isEdit = Boolean(treatment)
 
@@ -186,10 +195,10 @@ export default function TreatmentEditSheet({
       // Then upload any newly picked photos in parallel. `existingPhotos`
       // already excludes anything the user removed (handleRemovePhoto
       // filters it on the spot), so the remaining room is simply
-      // MAX_PHOTOS minus what's still attached.
+      // maxPhotos minus what's still attached.
       let failedUploads = 0
       if (localPhotos.length > 0) {
-        const room = Math.max(0, MAX_PHOTOS - existingPhotos.length)
+        const room = Math.max(0, maxPhotos - existingPhotos.length)
         const results = await Promise.allSettled(
           localPhotos
             .slice(0, room)
@@ -283,22 +292,15 @@ export default function TreatmentEditSheet({
     },
   })
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!treatment) return
-    // Native confirmation prompt — destructive action style highlights the
-    // delete button in red on iOS and stacks naturally on Android.
-    Alert.alert(
-      t('treatment.deleteConfirmTitle'),
-      t('treatment.deleteConfirmBody'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.delete'),
-          style: 'destructive',
-          onPress: () => deleteMutation.mutate(),
-        },
-      ]
-    )
+    const ok = await confirm({
+      title: t('treatment.deleteConfirmTitle'),
+      message: t('treatment.deleteConfirmBody'),
+      confirmLabel: t('common.delete'),
+      destructive: true,
+    })
+    if (ok) deleteMutation.mutate()
   }
 
   const handleSave = () => {
@@ -333,9 +335,9 @@ export default function TreatmentEditSheet({
 
   const onPickedAssets = (assets: PickedAsset[]) => {
     const used = existingPhotos.length + localPhotos.length
-    const room = Math.max(0, MAX_PHOTOS - used)
+    const room = Math.max(0, maxPhotos - used)
     if (assets.length > room) {
-      toast.warning(t('gallery.maxReached', { count: MAX_PHOTOS }))
+      toast.warning(t('gallery.maxReached', { count: maxPhotos }))
     }
     const incoming: LocalPhoto[] = assets.slice(0, room).map((a, i) => ({
       localId: `local-${Date.now()}-${i}`,
@@ -497,7 +499,10 @@ export default function TreatmentEditSheet({
             placeholder={t('treatment.commentPlaceholder')}
             multiline
             numberOfLines={3}
-            maxLength={500}
+            // Backend StoreTreatmentRequest allows up to 5000 chars on
+            // comment/description — mirror the full limit so a long note
+            // isn't truncated locally.
+            maxLength={5000}
             error={!!errors.comment}
             style={{ minHeight: 60, textAlignVertical: 'top', paddingTop: 14 }}
           />
@@ -512,7 +517,7 @@ export default function TreatmentEditSheet({
             onPressAdd={() => setPickerOpen(true)}
             onRemovePhoto={handleRemovePhoto}
             onPressPhoto={(idx) => setLightboxIndex(idx)}
-            maxPhotos={MAX_PHOTOS}
+            maxPhotos={maxPhotos}
           />
         </View>
 
@@ -544,21 +549,19 @@ export default function TreatmentEditSheet({
         visible={pickerOpen}
         onClose={() => setPickerOpen(false)}
         onPicked={onPickedAssets}
-        maxSelection={Math.max(1, MAX_PHOTOS - galleryPhotos.length)}
+        maxSelection={Math.max(1, maxPhotos - galleryPhotos.length)}
       />
 
       <MonthCalendarPicker
         visible={calendarOpen}
         value={treatmentDate}
         // Treatment can be back-dated (dentist enters yesterday's procedure
-        // notes), so we drop the default minDate. Cap forward at +30 days —
-        // scheduling far-future treatments is what appointments are for.
+        // notes), so we drop the default minDate. Cap forward at today —
+        // backend StoreTreatmentRequest enforces `before_or_equal:today`;
+        // future dates would 422. Scheduling far-future visits is what
+        // appointments are for.
         minDate={null}
-        maxDate={(() => {
-          const d = new Date()
-          d.setDate(d.getDate() + 30)
-          return d
-        })()}
+        maxDate={new Date()}
         title={t('treatment.dateLabel')}
         onClose={() => setCalendarOpen(false)}
         onConfirm={(k) => {

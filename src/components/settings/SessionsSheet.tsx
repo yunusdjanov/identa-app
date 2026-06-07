@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { View, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native'
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 
@@ -8,6 +8,7 @@ import Icon, { IconName } from '../ui/Icon'
 import Button from '../ui/Button'
 import EmptyState from '../ui/EmptyState'
 import { useToast } from '../ui/Toast'
+import { useDialog } from '../ui/Dialog'
 import { useI18n } from '../../i18n'
 import type { TFunction } from '../../i18n/helpers'
 import { listSessions, revokeSession } from '../../api/sessions'
@@ -34,6 +35,7 @@ export default function SessionsSheet({ visible, onClose }: Props) {
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const toast = useToast()
+  const { confirm } = useDialog()
   const queryClient = useQueryClient()
 
   const query = useQuery({
@@ -58,19 +60,14 @@ export default function SessionsSheet({ visible, onClose }: Props) {
     },
   })
 
-  const onRevoke = (session: ApiSession) => {
-    Alert.alert(
-      t('settings.sessionsSheet.revokeConfirm'),
-      t('settings.sessionsSheet.revokeConfirmSub'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('settings.sessionsSheet.revoke'),
-          style: 'destructive',
-          onPress: () => revokeMutation.mutate(session.id),
-        },
-      ]
-    )
+  const onRevoke = async (session: ApiSession) => {
+    const ok = await confirm({
+      title: t('settings.sessionsSheet.revokeConfirm'),
+      message: t('settings.sessionsSheet.revokeConfirmSub'),
+      confirmLabel: t('settings.sessionsSheet.revoke'),
+      destructive: true,
+    })
+    if (ok) revokeMutation.mutate(session.id)
   }
 
   return (

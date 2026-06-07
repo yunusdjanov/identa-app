@@ -86,6 +86,21 @@ export function formatTime(time: string): string {
   return time.length >= 5 ? time.substring(0, 5) : time
 }
 
+// Calendar-correct age in whole years from a date of birth (local time).
+// Mirrors web `computePatientAge`. Returns null for missing/invalid input.
+// Use this everywhere instead of a `365.25`-day division, which drifts by a
+// year around birthdays.
+export function ageFromDob(dob: Date | null): number | null {
+  if (!dob || Number.isNaN(dob.getTime())) return null
+  const now = new Date()
+  let years = now.getFullYear() - dob.getFullYear()
+  const monthDelta = now.getMonth() - dob.getMonth()
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < dob.getDate())) {
+    years--
+  }
+  return years
+}
+
 // Local "YYYY-MM-DD" string for today's date in the user's timezone.
 export function toLocalDateKey(date: Date = new Date()): string {
   const y = date.getFullYear()

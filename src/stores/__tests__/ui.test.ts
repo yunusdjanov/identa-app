@@ -13,7 +13,7 @@ describe('useUIStore', () => {
 
   describe('create-appointment sheet', () => {
     it('opens with an optional date', () => {
-      useUIStore.getState().openCreateAppointment('2026-05-24')
+      useUIStore.getState().openCreateAppointment({ date: '2026-05-24' })
       const s = useUIStore.getState()
       expect(s.createAppointmentOpen).toBe(true)
       expect(s.createAppointmentDate).toBe('2026-05-24')
@@ -24,14 +24,32 @@ describe('useUIStore', () => {
       const s = useUIStore.getState()
       expect(s.createAppointmentOpen).toBe(true)
       expect(s.createAppointmentDate).toBeNull()
+      expect(s.createAppointmentPatient).toBeNull()
     })
 
-    it('closes and clears the date', () => {
-      useUIStore.getState().openCreateAppointment('2026-05-24')
+    it('opens with a pre-selected patient (e.g. from patient detail)', () => {
+      const patient = {
+        id: 'p-1',
+        patient_id: 'P-0001',
+        full_name: 'Aziz Karimov',
+        phone: '+998901234567',
+      } as any
+      useUIStore.getState().openCreateAppointment({ patient })
+      const s = useUIStore.getState()
+      expect(s.createAppointmentOpen).toBe(true)
+      expect(s.createAppointmentPatient?.id).toBe('p-1')
+    })
+
+    it('closes and clears the date + patient', () => {
+      useUIStore.getState().openCreateAppointment({
+        date: '2026-05-24',
+        patient: { id: 'p-1', patient_id: 'P-0001', full_name: 'A', phone: '+998901234567' } as any,
+      })
       useUIStore.getState().closeCreateAppointment()
       const s = useUIStore.getState()
       expect(s.createAppointmentOpen).toBe(false)
       expect(s.createAppointmentDate).toBeNull()
+      expect(s.createAppointmentPatient).toBeNull()
     })
   })
 

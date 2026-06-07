@@ -7,13 +7,13 @@ import {
   StyleSheet,
   Animated,
   Easing,
-  Alert,
   ScrollView,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Haptics from 'expo-haptics'
 import { useI18n } from '../../i18n'
 import { useToast } from '../ui/Toast'
+import { useDialog } from '../ui/Dialog'
 import Icon, { IconName } from '../ui/Icon'
 import Button from '../ui/Button'
 import PatientAvatar from '../ui/PatientAvatar'
@@ -62,6 +62,7 @@ export default function AppointmentDetailSheet({
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const toast = useToast()
+  const { confirm } = useDialog()
 
   const slide = useRef(new Animated.Value(500)).current
   const fade = useRef(new Animated.Value(0)).current
@@ -110,24 +111,17 @@ export default function AppointmentDetailSheet({
     close()
   }
 
-  const confirmDelete = () => {
-    Alert.alert(
-      t('appointments.detail.deleteConfirm'),
-      t('appointments.detail.deleteConfirmSub'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.delete'),
-          style: 'destructive',
-          onPress: () => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-            onDelete?.(appointment.id)
-            toast.info(t('appointments.detail.deleted'))
-            close()
-          },
-        },
-      ]
-    )
+  const confirmDelete = async () => {
+    const ok = await confirm({
+      title: t('appointments.detail.deleteConfirm'),
+      message: t('appointments.detail.deleteConfirmSub'),
+      confirmLabel: t('common.delete'),
+      destructive: true,
+    })
+    if (!ok) return
+    onDelete?.(appointment.id)
+    toast.info(t('appointments.detail.deleted'))
+    close()
   }
 
   return (

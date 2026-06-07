@@ -42,6 +42,9 @@ interface Props {
   visible: boolean
   onClose: () => void
   defaultDate?: Date
+  // When provided, the sheet opens with this patient pre-selected — set by
+  // PatientDetailScreen so scheduling from a patient skips the search step.
+  defaultPatient?: ApiPatient | null
   // Receives the freshly-created appointment so the caller can react with
   // context (e.g. jump the AppointmentsScreen to its date). Optional to
   // preserve backward compatibility for callers that don't care.
@@ -61,6 +64,7 @@ export default function AppointmentCreateSheet({
   visible,
   onClose,
   defaultDate,
+  defaultPatient,
   onCreated,
 }: Props) {
   const { t, locale } = useI18n()
@@ -94,14 +98,14 @@ export default function AppointmentCreateSheet({
   // appointments load (see effect below); 09:00 here is just a placeholder.
   useEffect(() => {
     if (visible) {
-      setPatient(null)
+      setPatient(defaultPatient ?? null)
       setSearch('')
       setDate(defaultDate ?? new Date())
       setTime('09:00')
       setDuration(30)
       setReason('')
     }
-  }, [visible, defaultDate])
+  }, [visible, defaultDate, defaultPatient])
 
   // Patient search.
   // Only hit the API once the user types at least one character — the

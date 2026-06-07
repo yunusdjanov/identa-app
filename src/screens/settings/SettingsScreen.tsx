@@ -6,7 +6,6 @@ import {
   ScrollView,
   StatusBar,
   Pressable,
-  Alert,
   Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -32,6 +31,7 @@ import AppearanceSheet from '../../components/settings/AppearanceSheet'
 import SessionsSheet from '../../components/settings/SessionsSheet'
 import Icon from '../../components/ui/Icon'
 import { useToast } from '../../components/ui/Toast'
+import { useDialog } from '../../components/ui/Dialog'
 
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
@@ -55,6 +55,7 @@ export default function SettingsScreen() {
   const logout = useAuthStore((s) => s.logout)
   const navigation = useNavigation()
   const toast = useToast()
+  const { confirm } = useDialog()
   const queryClient = useQueryClient()
 
   const isDentist = user?.role === 'dentist'
@@ -75,28 +76,21 @@ export default function SettingsScreen() {
     })
   }
 
-  const onLogout = () => {
-    Alert.alert(
-      t('settings.logoutConfirm'),
-      t('settings.logoutConfirmSub'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('settings.logout'),
-          style: 'destructive',
-          onPress: async () => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-            try {
-              await logoutApi()
-            } catch {
-              // ignore
-            }
-            queryClient.clear()
-            logout()
-          },
-        },
-      ]
-    )
+  const onLogout = async () => {
+    const ok = await confirm({
+      title: t('settings.logoutConfirm'),
+      message: t('settings.logoutConfirmSub'),
+      confirmLabel: t('settings.logout'),
+      destructive: true,
+    })
+    if (!ok) return
+    try {
+      await logoutApi()
+    } catch {
+      // ignore
+    }
+    queryClient.clear()
+    logout()
   }
 
   const version = '1.0.0'

@@ -288,10 +288,10 @@ export default function DashboardScreen() {
                     label={t('dashboard.outstandingDebt')}
                     value={debtParts.value}
                     unit={debtParts.unit}
-                    // Green when there's no debt (success), red when there's
-                    // outstanding balance to recover (danger). Keeps the card
-                    // semantically meaningful at a glance.
-                    tone={data.outstanding_debt_total > 0 ? 'danger' : 'success'}
+                    // Outstanding debt always uses the red (danger) tone — even
+                    // at 0 — to match the web dashboard's product rule (debt is
+                    // a "money owed" category, kept visually consistent).
+                    tone="danger"
                     numericValue={data.outstanding_debt_total}
                     formatValue={formatRevenue}
                     trend={debtTrend}

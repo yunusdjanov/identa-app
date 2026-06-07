@@ -8,7 +8,6 @@ import {
   StatusBar,
   ActivityIndicator,
   Linking,
-  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -24,17 +23,29 @@ import TreatmentDetailSheet from '../../components/payments/TreatmentDetailSheet
 import { TreatmentEditSheet } from '../../components/treatments'
 import Icon, { IconName } from '../../components/ui/Icon'
 import EmptyState from '../../components/ui/EmptyState'
-import Button from '../../components/ui/Button'
 import { useToast } from '../../components/ui/Toast'
+import { useDialog } from '../../components/ui/Dialog'
 
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
 import { useUIStore } from '../../stores/ui'
 import { canManage } from '../../lib/permissions'
 import { isOfflineError } from '../../lib/offlineGuard'
-import { getPatient, getPatientOverview, archivePatient, restorePatient } from '../../api/patients'
+import {
+  getPatient,
+  getPatientOverview,
+  archivePatient,
+  restorePatient,
+  forceDeletePatient,
+} from '../../api/patients'
 import { listTreatments } from '../../api/treatments'
-import { formatCurrencyParts } from '../../lib/format'
+import {
+  ageFromDob,
+  formatCurrencyParts,
+  formatDayMonth,
+  fromLocalDateKey,
+  getRelativeDateBucket,
+} from '../../lib/format'
 import { radius, spacing, typography, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import type { MainStackParams } from '../../navigation'
@@ -50,6 +61,7 @@ export default function PatientDetailScreen() {
   const navigation = useNavigation<Nav>()
   const route = useRoute<Route>()
   const toast = useToast()
+  const { actionSheet, confirm } = useDialog()
   const user = useAuthStore((s) => s.user)
 
   const canManagePatient = canManage(user, 'patients')
@@ -104,7 +116,9 @@ export default function PatientDetailScreen() {
   const onSchedule = () => {
     if (!canCreateAppointment) return
     Haptics.selectionAsync()
-    useUIStore.getState().openCreateAppointment()
+    // Pre-select this patient so the create sheet opens skipping the search
+    // step — matches the web's `?patientId=` deep link from the detail page.
+    useUIStore.getState().openCreateAppointment({ patient: patient ?? undefined })
   }
 
   const onEdit = () => {
@@ -142,18 +156,67 @@ export default function PatientDetailScreen() {
     },
   })
 
-  const onArchivePress = () => {
-    Alert.alert(t('patients.detail.archiveConfirm'), t('patients.detail.archiveConfirmSub'), [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: t('patients.detail.actions.archive'),
-        style: 'destructive',
-        onPress: () => {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-          archiveMutation.mutate()
-        },
-      },
-    ])
+  const forceDeleteMutation = useMutation({
+    mutationFn: () => forceDeletePatient(route.params.id),
+    onSuccess: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      toast.success(t('patients.detail.deletedPermanent'))
+      queryClient.invalidateQueries({ queryKey: ['patients'] })
+      navigation.goBack()
+    },
+    onError: (err) => {
+      if (isOfflineError(err)) return
+      toast.error(t('patients.form.failed'))
+    },
+  })
+
+  // Top-bar overflow menu — always opens an app-styled action sheet (the same
+  // pattern in both states). Active → "Archive" → confirm. Archived → "Restore"
+  // (reversible, direct) or "Delete permanently" → type-the-name confirm.
+  const onMoreActions = async () => {
+    if (!patient) return
+    Haptics.selectionAsync()
+
+    if (!patient.is_archived) {
+      const idx = await actionSheet({
+        title: patient.full_name,
+        options: [
+          { label: t('patients.detail.actions.archive'), icon: 'archive-outline', destructive: true },
+        ],
+      })
+      if (idx !== 0) return
+      const ok = await confirm({
+        title: t('patients.detail.archiveConfirm'),
+        message: t('patients.detail.archiveConfirmSub'),
+        confirmLabel: t('patients.detail.actions.archive'),
+        destructive: true,
+      })
+      if (ok) archiveMutation.mutate()
+      return
+    }
+
+    const idx = await actionSheet({
+      title: patient.full_name,
+      options: [
+        { label: t('patients.detail.actions.unarchive'), icon: 'arrow-undo-outline' },
+        { label: t('patients.detail.deletePermanent'), icon: 'trash-outline', destructive: true },
+      ],
+    })
+    if (idx === 0) {
+      restoreMutation.mutate()
+    } else if (idx === 1) {
+      const ok = await confirm({
+        title: t('patients.detail.deletePermanentConfirm'),
+        message: t('patients.detail.deletePermanentConfirmSub'),
+        confirmLabel: t('common.delete'),
+        destructive: true,
+        // Mirror the web: must type the patient's name to enable delete.
+        requireText: patient.full_name,
+        requireTextLabel: t('patients.detail.deletePermanentTypeName', { name: patient.full_name }),
+        requireTextPlaceholder: patient.full_name,
+      })
+      if (ok) forceDeleteMutation.mutate()
+    }
   }
 
   const debtParts = overview ? formatCurrencyParts(overview.total_debt, locale) : null
@@ -192,6 +255,30 @@ export default function PatientDetailScreen() {
     patient.allergies || patient.current_medications || patient.medical_history
   )
 
+  // Vital chips under the hero — matches the web detail card's "quick vitals"
+  // tiles (appointment count / last visit / age). Each chip is only rendered
+  // when its data is present, so an empty patient has none.
+  // Calendar-correct age via the shared helper (matches web computePatientAge).
+  const age = ageFromDob(dob)
+  const lastVisitLabel = ((): string | null => {
+    if (!patient.last_visit_at) return null
+    const b = getRelativeDateBucket(new Date(patient.last_visit_at))
+    switch (b.bucket) {
+      case 'today':
+        return t('patients.time.today')
+      case 'yesterday':
+        return t('patients.time.yesterday')
+      case 'daysAgo':
+        return t('patients.time.daysAgo', { n: b.value })
+      case 'weeksAgo':
+        return t('patients.time.weeksAgo', { n: b.value })
+      case 'monthsAgo':
+        return t('patients.time.monthsAgo', { n: b.value })
+      case 'yearsAgo':
+        return t('patients.time.yearsAgo', { n: b.value })
+    }
+  })()
+
   return (
     <View style={styles.root}>
       <LinearGradient
@@ -211,8 +298,19 @@ export default function PatientDetailScreen() {
             {patient.full_name}
           </Text>
           {canManagePatient ? (
-            <Pressable onPress={onEdit} hitSlop={12} style={styles.iconBtn}>
-              <Icon name="create-outline" size={20} color={c.brand as string} />
+            <Pressable
+              onPress={onMoreActions}
+              hitSlop={12}
+              style={styles.iconBtn}
+              accessibilityRole="button"
+            >
+              {archiveMutation.isPending ||
+              restoreMutation.isPending ||
+              forceDeleteMutation.isPending ? (
+                <ActivityIndicator size="small" color={c.brand as string} />
+              ) : (
+                <Icon name="ellipsis-horizontal" size={20} color={c.brand as string} />
+              )}
             </Pressable>
           ) : (
             <View style={{ width: 34 }} />
@@ -223,16 +321,29 @@ export default function PatientDetailScreen() {
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
         >
-          {/* Hero */}
+          {/* Hero — only render the photo once moderation has approved it.
+              Pending / rejected uploads fall back to initials (mirrors the
+              web, which gates on photo_scan_status). A small "pending review"
+              hint reassures the user their upload didn't silently fail. */}
           <View style={styles.hero}>
             <PatientAvatar
               name={patient.full_name}
               size={80}
-              uri={patient.photo_thumbnail_url ?? patient.photo_url}
+              uri={
+                patient.photo_scan_status === 'rejected' ||
+                patient.photo_scan_status === 'pending'
+                  ? null
+                  : (patient.photo_thumbnail_url ?? patient.photo_url)
+              }
             />
             <Text style={styles.heroName} numberOfLines={1}>
               {patient.full_name}
             </Text>
+            {patient.photo_scan_status === 'pending' ? (
+              <Text style={styles.photoPendingHint}>
+                {t('patients.detail.photoPending')}
+              </Text>
+            ) : null}
             <Text style={styles.heroId}>{patient.patient_id}</Text>
             {patient.categories && patient.categories.length > 0 ? (
               <View style={styles.heroCategoryRow}>
@@ -249,6 +360,34 @@ export default function PatientDetailScreen() {
                 ))}
               </View>
             ) : null}
+
+            {/* Vitals — quick snapshot chips (appointments / last visit / age) */}
+            <View style={styles.vitalsRow}>
+              <View style={styles.vitalChip}>
+                <Icon name="calendar-outline" size={13} color={c.labelSecondary as string} />
+                <Text style={styles.vitalText}>
+                  {t('patients.detail.vitals.appointments', {
+                    n: overview?.appointment_count ?? 0,
+                  })}
+                </Text>
+              </View>
+              {lastVisitLabel ? (
+                <View style={styles.vitalChip}>
+                  <Icon name="time-outline" size={13} color={c.labelSecondary as string} />
+                  <Text style={styles.vitalText}>
+                    {t('patients.detail.vitals.lastVisit', { when: lastVisitLabel })}
+                  </Text>
+                </View>
+              ) : null}
+              {age != null ? (
+                <View style={styles.vitalChip}>
+                  <Icon name="gift-outline" size={13} color={c.labelSecondary as string} />
+                  <Text style={styles.vitalText}>
+                    {t('patients.detail.vitals.age', { n: age })}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
 
             {/* Quick actions */}
             <View style={styles.actions}>
@@ -384,6 +523,36 @@ export default function PatientDetailScreen() {
             </View>
           ) : null}
 
+          {/* Upcoming appointments — the next 3 scheduled visits (from
+              backend overview). Mirrors the web detail page's Upcoming card
+              so a dentist sees schedule context without leaving the page. */}
+          {overview?.upcoming_appointments && overview.upcoming_appointments.length > 0 ? (
+            <View>
+              <Text style={styles.sectionTitle}>{t('patients.detail.sections.upcoming')}</Text>
+              <View style={styles.upcomingList}>
+                {overview.upcoming_appointments.map((appt, i, arr) => (
+                  <React.Fragment key={appt.id}>
+                    <View style={styles.upcomingRow}>
+                      <View style={styles.upcomingIconBubble}>
+                        <Icon name="calendar-outline" size={18} color={c.brand as string} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.upcomingDate} numberOfLines={1}>
+                          {formatDayMonth(fromLocalDateKey(appt.appointment_date), locale)}
+                        </Text>
+                        <Text style={styles.upcomingMeta} numberOfLines={1}>
+                          {appt.start_time}–{appt.end_time}
+                          {appt.notes ? ` · ${appt.notes}` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                    {i < arr.length - 1 ? <View style={styles.rowSep} /> : null}
+                  </React.Fragment>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
           {/* Odontogram quick-link */}
           <Pressable
             style={styles.odontogramLink}
@@ -447,29 +616,22 @@ export default function PatientDetailScreen() {
             )}
           </View>
 
-          {/* Archive / restore — write action, gated by patients.manage. */}
-          {canManagePatient ? (
-            patient.is_archived ? (
-              <Button
-                title={t('patients.detail.actions.unarchive')}
-                variant="secondary"
-                size="lg"
-                fullWidth
-                loading={restoreMutation.isPending}
-                onPress={() => restoreMutation.mutate()}
-                style={{ marginTop: spacing.xl }}
-              />
-            ) : (
-              <Button
-                title={t('patients.detail.actions.archive')}
-                variant="destructive"
-                size="lg"
-                fullWidth
-                loading={archiveMutation.isPending}
-                onPress={onArchivePress}
-                style={{ marginTop: spacing.xl }}
-              />
-            )
+          {/* Archived patients get a subtle inline restore affordance at the
+              foot of the record; archiving lives in the top-bar overflow menu. */}
+          {canManagePatient && patient.is_archived ? (
+            <Pressable
+              onPress={() => restoreMutation.mutate()}
+              disabled={restoreMutation.isPending}
+              style={styles.restoreRow}
+              accessibilityRole="button"
+            >
+              {restoreMutation.isPending ? (
+                <ActivityIndicator size="small" color={c.brand as string} />
+              ) : (
+                <Icon name="arrow-undo-outline" size={16} color={c.brand as string} />
+              )}
+              <Text style={styles.restoreText}>{t('patients.detail.actions.unarchive')}</Text>
+            </Pressable>
           ) : null}
         </ScrollView>
       </SafeAreaView>
@@ -627,6 +789,19 @@ function makeStyles(c: Colors) {
       color: c.brandDeep,
       textAlign: 'center',
     },
+    restoreRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: spacing.sm,
+      marginTop: spacing.xs,
+    },
+    restoreText: {
+      ...typography.subhead,
+      color: c.brand as string,
+      fontFamily: font('600'),
+    },
     scroll: {
       paddingBottom: 60,
       gap: spacing.lg,
@@ -643,6 +818,12 @@ function makeStyles(c: Colors) {
       marginTop: 10,
       textAlign: 'center',
     },
+    photoPendingHint: {
+      ...typography.caption1,
+      color: c.warning as string,
+      fontFamily: font('600'),
+      marginTop: 4,
+    },
     heroId: {
       fontFamily: font('600'),
       fontSize: 13,
@@ -656,6 +837,27 @@ function makeStyles(c: Colors) {
       justifyContent: 'center',
       gap: 6,
       marginTop: 8,
+    },
+    vitalsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: 6,
+      marginTop: 10,
+    },
+    vitalChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: radius.pill,
+      backgroundColor: c.fillQuaternary,
+    },
+    vitalText: {
+      ...typography.caption1,
+      fontFamily: font('600'),
+      color: c.labelSecondary,
     },
     heroCategoryPill: {
       flexDirection: 'row',
@@ -792,6 +994,36 @@ function makeStyles(c: Colors) {
       shadowOpacity: 0.04,
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 2 },
+    },
+    upcomingList: {
+      backgroundColor: c.background,
+      borderRadius: radius.xl,
+      marginHorizontal: 16,
+      paddingVertical: 4,
+    },
+    upcomingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+      paddingVertical: 10,
+      paddingHorizontal: spacing.lg,
+    },
+    upcomingIconBubble: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: c.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    upcomingDate: {
+      ...typography.bodyEmphasized,
+      color: c.label,
+    },
+    upcomingMeta: {
+      ...typography.footnote,
+      color: c.labelSecondary,
+      marginTop: 2,
     },
     odontogramIconBubble: {
       width: 40,

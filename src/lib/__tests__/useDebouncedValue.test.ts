@@ -15,7 +15,7 @@ describe('useDebouncedValue', () => {
 
   it('debounces value updates by the configured delay', () => {
     const { result, rerender } = renderHook(
-      ({ value }) => useDebouncedValue(value, 250),
+      ({ value }: { value: string }) => useDebouncedValue(value, 250),
       { initialProps: { value: 'a' } }
     )
 
@@ -35,7 +35,7 @@ describe('useDebouncedValue', () => {
 
   it('resets the timer when the value changes mid-debounce (typing pattern)', () => {
     const { result, rerender } = renderHook(
-      ({ value }) => useDebouncedValue(value, 200),
+      ({ value }: { value: string }) => useDebouncedValue(value, 200),
       { initialProps: { value: '' } }
     )
 

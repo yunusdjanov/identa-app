@@ -267,6 +267,10 @@ export const listTreatments = async (params?: ListParams): Promise<ApiListRespon
   if (params?.patient_id) realParams['filter[patient_id]'] = params.patient_id
   if (params?.page) realParams.page = params.page
   if (params?.per_page) realParams.per_page = params.per_page
+  // Default sort: newest treatment first, then most-recently-created as a
+  // tiebreaker. Matches the web treatment-history-card so list order is the
+  // same across clients (was previously left to backend default).
+  realParams.sort = '-treatment_date,-created_at'
 
   const response = await client.get<ApiListResponse<ApiTreatment>>('/treatments', {
     params: realParams,

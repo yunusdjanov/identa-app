@@ -7,7 +7,7 @@ import { radius, typography, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import { useI18n } from '../../i18n'
 import type { TFunction } from '../../i18n/helpers'
-import { getRelativeDateBucket } from '../../lib/format'
+import { ageFromDob, getRelativeDateBucket } from '../../lib/format'
 import { formatStoredPhone } from '../../lib/phoneFormat'
 import type { ApiPatient } from '../../types'
 
@@ -24,6 +24,23 @@ export default function PatientCard({ patient, onPress, onLongPress }: Props) {
   const category = patient.categories?.[0]
   const lastVisitLabel = formatLastVisit(patient.last_visit_at, t)
   const phoneFormatted = formatStoredPhone(patient.phone)
+  // Show the patient's profile photo when moderation has approved it; pending
+  // / rejected fall back to initials (mirrors the detail screen and the web).
+  const photoUri =
+    patient.photo_scan_status === 'rejected' || patient.photo_scan_status === 'pending'
+      ? null
+      : (patient.photo_thumbnail_url ?? patient.photo_url ?? null)
+  // Age derived from DOB so the row carries one more identifying signal next
+  // to the phone (web shows DOB explicitly; age is a compact equivalent).
+  const dobDate = patient.date_of_birth ? new Date(patient.date_of_birth) : null
+  // Calendar-correct age via the shared helper (consistent with the detail screen).
+  const age = ageFromDob(dobDate)
+  const phoneLine =
+    age != null && phoneFormatted
+      ? `${phoneFormatted} · ${t('patients.detail.vitals.age', { n: age })}`
+      : age != null
+        ? t('patients.detail.vitals.age', { n: age })
+        : phoneFormatted
 
   const handlePress = () => {
     if (onPress) {
@@ -34,7 +51,7 @@ export default function PatientCard({ patient, onPress, onLongPress }: Props) {
 
   const Inner = (
     <View style={styles.row}>
-      <PatientAvatar name={patient.full_name} size={40} />
+      <PatientAvatar name={patient.full_name} size={40} uri={photoUri} />
 
       <View style={styles.body}>
         <View style={styles.topLine}>
@@ -49,7 +66,7 @@ export default function PatientCard({ patient, onPress, onLongPress }: Props) {
         </View>
         <View style={styles.bottomLine}>
           <Text style={styles.phone} numberOfLines={1}>
-            {phoneFormatted}
+            {phoneLine}
           </Text>
           {category ? (
             <View style={[styles.categoryPill, { backgroundColor: `${category.color}1A` }]}>

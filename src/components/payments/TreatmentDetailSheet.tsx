@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react'
-import { View, Text, StyleSheet, Pressable, TextInput, Alert } from 'react-native'
+import { View, Text, StyleSheet, Pressable, TextInput } from 'react-native'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 
@@ -8,6 +8,7 @@ import Button from '../ui/Button'
 import Icon from '../ui/Icon'
 import PatientAvatar from '../ui/PatientAvatar'
 import { useToast } from '../ui/Toast'
+import { useDialog } from '../ui/Dialog'
 
 import { useI18n } from '../../i18n'
 import type { TFunction } from '../../i18n/helpers'
@@ -41,6 +42,7 @@ export default function TreatmentDetailSheet({ visible, treatment, onClose, onUp
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const toast = useToast()
+  const { confirm } = useDialog()
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const canManagePayments = canManage(user, 'payments')
@@ -240,19 +242,14 @@ export default function TreatmentDetailSheet({ visible, treatment, onClose, onUp
         t={t}
         onDeletePayment={
           canManagePayments
-            ? (paymentId) => {
-                Alert.alert(
-                  t('payments.treatment.deleteTitle'),
-                  t('payments.treatment.deleteBody'),
-                  [
-                    { text: t('common.cancel'), style: 'cancel' },
-                    {
-                      text: t('common.delete'),
-                      style: 'destructive',
-                      onPress: () => deleteMutation.mutate(paymentId),
-                    },
-                  ]
-                )
+            ? async (paymentId) => {
+                const ok = await confirm({
+                  title: t('payments.treatment.deleteTitle'),
+                  message: t('payments.treatment.deleteBody'),
+                  confirmLabel: t('common.delete'),
+                  destructive: true,
+                })
+                if (ok) deleteMutation.mutate(paymentId)
               }
             : undefined
         }
@@ -428,14 +425,13 @@ function PaymentHistorySection({
         ) : null}
       </View>
 
-      {sorted.length === 0 ? (
-        <View style={styles.historyEmpty}>
-          <Icon name="receipt-outline" size={22} color={c.labelTertiary as string} />
-          <Text style={styles.historyEmptyText}>
-            {t('payments.treatment.historyEmpty')}
-          </Text>
-        </View>
-      ) : (
+      {/* Backend's TreatmentResource doesn't include past payments — only
+          this session's optimistic adds end up in `payments`. We used to show
+          a "no payments yet" empty state, but that was misleading for
+          previously-recorded payments (they exist server-side but never
+          load), so we simply omit the list when empty. The summary card
+          above already conveys paid amount + balance status. */}
+      {sorted.length > 0 && (
         <View style={styles.historyList}>
           {sorted.map((p, i) => {
             const amountParts = formatCurrencyParts(p.amount, locale)

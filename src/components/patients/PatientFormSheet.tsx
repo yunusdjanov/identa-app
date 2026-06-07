@@ -20,7 +20,7 @@ import {
   deletePatientPhoto,
 } from '../../api/patients'
 import { useI18n } from '../../i18n'
-import { toIntlLocale } from '../../lib/format'
+import { toIntlLocale, toLocalDateKey } from '../../lib/format'
 import type { Locale } from '../../constants'
 import { radius, spacing, font, typography } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
@@ -34,8 +34,6 @@ interface Props {
   patientId?: string | null  // null = create, string = edit
   onSaved?: () => void
 }
-
-type Gender = 'male' | 'female' | null
 
 // Mirrors the backend phone rule (StorePatientRequest): a leading `+` then
 // 9–15 digits. `applyPhoneInput(...).raw` produces exactly this shape.
@@ -56,7 +54,6 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [secondaryPhone, setSecondaryPhone] = useState('')
-  const [gender, setGender] = useState<Gender>(null)
   const [dob, setDob] = useState('')
   const [address, setAddress] = useState('')
   const [allergies, setAllergies] = useState('')
@@ -106,7 +103,6 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
         // shows the same shape as the user typed it on creation.
         setPhone(formatStoredPhone(p.phone))
         setSecondaryPhone(formatStoredPhone(p.secondary_phone))
-        setGender((p.gender as Gender) ?? null)
         setDob(p.date_of_birth ?? '')
         setAddress(p.address ?? '')
         setAllergies(p.allergies ?? '')
@@ -118,7 +114,6 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
       setName('')
       setPhone('')
       setSecondaryPhone('')
-      setGender(null)
       setDob('')
       setAddress('')
       setAllergies('')
@@ -152,7 +147,6 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
     // `formatStoredPhone` on read.
     phone: applyPhoneInput(phone).raw,
     secondary_phone: secondaryPhone.trim() ? applyPhoneInput(secondaryPhone).raw : undefined,
-    gender: gender ?? undefined,
     date_of_birth: dob.trim() || undefined,
     address: address.trim() || undefined,
     allergies: allergies.trim() || undefined,
@@ -306,23 +300,6 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
             maxLength={17}
             error={Boolean(secondaryPhoneError)}
           />
-        </Field>
-
-        <Field label={t('patients.form.gender')}>
-          <View style={styles.genderRow}>
-            <GenderChip
-              active={gender === 'male'}
-              onPress={() => setGender(gender === 'male' ? null : 'male')}
-              label={t('patients.form.male')}
-              iconChar="♂"
-            />
-            <GenderChip
-              active={gender === 'female'}
-              onPress={() => setGender(gender === 'female' ? null : 'female')}
-              label={t('patients.form.female')}
-              iconChar="♀"
-            />
-          </View>
         </Field>
 
         <Field label={t('patients.form.dob')}>
@@ -487,6 +464,7 @@ export default function PatientFormSheet({ visible, onClose, patientId, onSaved 
       <DateWheelPicker
         visible={dobPickerVisible}
         value={dob || null}
+        maxDate={toLocalDateKey(new Date())}
         onClose={() => setDobPickerVisible(false)}
         onConfirm={(d) => setDob(d)}
       />
@@ -523,33 +501,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <Text style={styles.fieldLabel}>{label}</Text>
       {children}
     </View>
-  )
-}
-
-function GenderChip({
-  active,
-  onPress,
-  label,
-  iconChar,
-}: {
-  active: boolean
-  onPress: () => void
-  label: string
-  iconChar: string
-}) {
-  const c = useColors()
-  const styles = useMemo(() => makeStyles(c), [c])
-  return (
-    <Pressable
-      onPress={() => {
-        Haptics.selectionAsync()
-        onPress()
-      }}
-      style={[styles.genderChip, active && styles.genderChipActive]}
-    >
-      <Text style={[styles.genderIcon, active && styles.genderIconActive]}>{iconChar}</Text>
-      <Text style={[styles.genderText, active && styles.genderTextActive]}>{label}</Text>
-    </Pressable>
   )
 }
 
@@ -604,35 +555,6 @@ function makeStyles(c: Colors) {
       letterSpacing: 0.4,
       marginLeft: 4,
     },
-    genderRow: {
-      flexDirection: 'row',
-      gap: spacing.sm,
-    },
-    genderChip: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      paddingVertical: 14,
-      borderRadius: radius.lg,
-      backgroundColor: c.fillQuaternary,
-    },
-    genderChipActive: {
-      backgroundColor: c.brand,
-    },
-    genderIcon: {
-      fontSize: 18,
-      color: c.labelSecondary,
-    },
-    genderIconActive: { color: '#FFFFFF' },
-    genderText: {
-      fontFamily: font('600'),
-      fontSize: 14,
-      fontWeight: '600',
-      color: c.label,
-    },
-    genderTextActive: { color: '#FFFFFF' },
     textareaWrap: {
       backgroundColor: c.fillQuaternary,
       borderRadius: radius.lg,

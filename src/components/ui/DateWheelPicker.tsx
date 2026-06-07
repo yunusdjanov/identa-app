@@ -27,6 +27,10 @@ interface Props {
   title?: string
   minYear?: number
   maxYear?: number
+  // Inclusive upper bound 'YYYY-MM-DD'. Caps the year column to its year and
+  // clamps the confirmed result so a future date can never be selected
+  // (e.g. date-of-birth or a treatment date must not exceed today).
+  maxDate?: string
   onClose: () => void
   onConfirm: (date: string) => void
 }
@@ -39,7 +43,8 @@ export default function DateWheelPicker({
   value,
   title,
   minYear = 1925,
-  maxYear = new Date().getFullYear() + 1,
+  maxDate,
+  maxYear = maxDate ? Number(maxDate.slice(0, 4)) : new Date().getFullYear() + 1,
   onClose,
   onConfirm,
 }: Props) {
@@ -78,7 +83,11 @@ export default function DateWheelPicker({
   }, [daysInMonth, day])
 
   const handleConfirm = () => {
-    const dateStr = `${year}-${pad(month)}-${pad(day)}`
+    let dateStr = `${year}-${pad(month)}-${pad(day)}`
+    // Clamp to the inclusive upper bound so a future date can't slip through
+    // (the year column is already capped, but month/day within the max year
+    // could still compose a future date).
+    if (maxDate && dateStr > maxDate) dateStr = maxDate
     onConfirm(dateStr)
     onClose()
   }

@@ -103,8 +103,20 @@ export default function PaymentsScreen() {
         })
       }
     }
-    // Sort: highest balance first
-    return Array.from(map.values()).sort((a, b) => b.balance - a.balance)
+    // Sort by absolute balance desc so big-debt and big-credit patients
+    // both bubble to the top — matches the web /payments page which sorts
+    // by |balance|. Previously credit (negative) patients sank to the
+    // bottom even when their absolute amount was large.
+    // Deterministic tiebreaks (match web): most recent entry first, then name —
+    // so equal-balance patients keep a stable, identical order across platforms.
+    return Array.from(map.values()).sort((a, b) => {
+      const byBalance = Math.abs(b.balance) - Math.abs(a.balance)
+      if (byBalance !== 0) return byBalance
+      const aDate = a.lastEntryDate ?? ''
+      const bDate = b.lastEntryDate ?? ''
+      if (aDate !== bDate) return bDate.localeCompare(aDate)
+      return a.patientName.localeCompare(b.patientName)
+    })
   }, [treatments])
 
   const totals = useMemo(() => {

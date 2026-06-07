@@ -10,6 +10,7 @@ import { StatusBar } from 'expo-status-bar'
 import Navigation from './src/navigation'
 import { I18nProvider } from './src/i18n'
 import { ToastProvider, getGlobalToast } from './src/components/ui/Toast'
+import { DialogProvider } from './src/components/ui/Dialog'
 import SplashGate from './src/components/ui/SplashGate'
 import NetworkBanner from './src/components/ui/NetworkBanner'
 import { isOfflineError } from './src/lib/offlineGuard'
@@ -100,11 +101,13 @@ function App() {
         >
           <I18nProvider>
             <ToastProvider>
-              <StatusBar style="auto" />
-              <SplashGate>
-                <Navigation />
-              </SplashGate>
-              <NetworkBanner />
+              <DialogProvider>
+                <StatusBar style="auto" />
+                <SplashGate>
+                  <Navigation />
+                </SplashGate>
+                <NetworkBanner />
+              </DialogProvider>
             </ToastProvider>
           </I18nProvider>
         </PersistQueryClientProvider>

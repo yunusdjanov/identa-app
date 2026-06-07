@@ -112,6 +112,7 @@ function MainNavigator() {
 
   const createApptOpen = useUIStore((s) => s.createAppointmentOpen)
   const createApptDate = useUIStore((s) => s.createAppointmentDate)
+  const createApptPatient = useUIStore((s) => s.createAppointmentPatient)
   const closeCreateAppt = useUIStore((s) => s.closeCreateAppointment)
 
   const patientFormOpen = useUIStore((s) => s.patientFormOpen)
@@ -134,6 +135,7 @@ function MainNavigator() {
       <AppointmentCreateSheet
         visible={createApptOpen}
         defaultDate={createApptDate ? fromLocalDateKey(createApptDate) : undefined}
+        defaultPatient={createApptPatient ?? undefined}
         onClose={closeCreateAppt}
         onCreated={(created) => {
           queryClient.invalidateQueries({ queryKey: ['appointments'] })

@@ -1,8 +1,11 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { translations } from './translations'
 import { DEFAULT_LOCALE, type Locale } from '../constants'
 import { setNotificationLocale } from '../lib/notifications'
 import { setCurrentLocale } from '../lib/currentLocale'
+
+const LOCALE_STORAGE_KEY = '@identa/locale'
 
 type Dict = typeof translations.uz
 
@@ -39,7 +42,31 @@ export function I18nProvider({
   children: React.ReactNode
   defaultLocale?: Locale
 }) {
-  const [locale, setLocale] = useState<Locale>(defaultLocale ?? DEFAULT_LOCALE)
+  const [locale, setLocaleState] = useState<Locale>(defaultLocale ?? DEFAULT_LOCALE)
+
+  // Persist the chosen language so it survives cold starts. Web persists the
+  // locale via cookie; mobile previously reset to DEFAULT_LOCALE every launch.
+  const setLocale = useCallback((next: Locale) => {
+    setLocaleState(next)
+    AsyncStorage.setItem(LOCALE_STORAGE_KEY, next).catch(() => {})
+  }, [])
+
+  // Hydrate the persisted locale on first mount. Skipped when an explicit
+  // `defaultLocale` is supplied (tests/Storybook) so those stay deterministic.
+  useEffect(() => {
+    if (defaultLocale) return
+    let active = true
+    AsyncStorage.getItem(LOCALE_STORAGE_KEY)
+      .then((stored) => {
+        if (active && (stored === 'ru' || stored === 'uz' || stored === 'en')) {
+          setLocaleState(stored)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [defaultLocale])
 
   const dict = translations[locale] as Dict
   const t = useCallback(
@@ -59,7 +86,7 @@ export function I18nProvider({
     setCurrentLocale(locale)
   }, [locale])
 
-  const value = useMemo(() => ({ locale, setLocale, t }), [locale, t])
+  const value = useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t])
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
 }
 

@@ -1,12 +1,14 @@
-import React, { useMemo } from 'react'
-import { View, Text, StyleSheet, Pressable } from 'react-native'
+import React, { useMemo, useState } from 'react'
+import { View, Text, Image, StyleSheet, Pressable } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import Icon from '../ui/Icon'
 import PatientAvatar from '../ui/PatientAvatar'
+import { LightboxViewer } from '../gallery'
 import { radius, typography, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import { useI18n } from '../../i18n'
 import { formatCurrencyParts, formatDayMonth, fromLocalDateKey } from '../../lib/format'
+import { resolveTreatmentImageUrl } from '../../api/treatments'
 import type { ApiTreatment } from '../../types'
 
 interface Props {
@@ -46,6 +48,24 @@ export default function TreatmentHistoryRow({ treatment, onPress }: Props) {
         : t('payments.history.teethShort', { n: treatment.teeth.length })
       : null
 
+  // Image preview + lightbox: gives the dentist direct visual access to
+  // treatment photos without needing to open the edit sheet. Matches the
+  // web tooth-detail dialog's per-treatment thumbnail+count badge.
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const imageUris = useMemo(() => {
+    const imgs = treatment.images ?? []
+    return imgs
+      .map((img) =>
+        resolveTreatmentImageUrl(img, 'preview') ?? resolveTreatmentImageUrl(img, 'full')
+      )
+      .filter((u): u is string => typeof u === 'string')
+  }, [treatment.images])
+  const thumbnailUri =
+    treatment.images && treatment.images.length > 0
+      ? (resolveTreatmentImageUrl(treatment.images[0]!, 'thumbnail') ??
+          resolveTreatmentImageUrl(treatment.images[0]!, 'preview'))
+      : null
+
   const Inner = (
     <View style={styles.row}>
       <PatientAvatar name={treatment.patient_name || '—'} size={38} />
@@ -81,23 +101,53 @@ export default function TreatmentHistoryRow({ treatment, onPress }: Props) {
         </View>
       </View>
 
+      {thumbnailUri ? (
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync()
+            setLightboxIndex(0)
+          }}
+          hitSlop={6}
+          style={styles.thumbWrap}
+          accessibilityRole="button"
+        >
+          <Image source={{ uri: thumbnailUri }} style={styles.thumb} />
+          {imageUris.length > 1 ? (
+            <View style={styles.thumbBadge}>
+              <Text style={styles.thumbBadgeText}>+{imageUris.length - 1}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      ) : null}
+
       {onPress ? (
         <Icon name="chevron-forward" size={16} color={c.labelTertiary as string} />
       ) : null}
     </View>
   )
 
-  if (onPress) {
-    return (
-      <Pressable
-        onPress={handlePress}
-        style={({ pressed }) => pressed && styles.pressed}
-      >
-        {Inner}
-      </Pressable>
-    )
-  }
-  return Inner
+  const Row = onPress ? (
+    <Pressable
+      onPress={handlePress}
+      style={({ pressed }) => pressed && styles.pressed}
+    >
+      {Inner}
+    </Pressable>
+  ) : (
+    Inner
+  )
+
+  return (
+    <>
+      {Row}
+      <LightboxViewer
+        visible={lightboxIndex !== null}
+        uris={imageUris}
+        startIndex={lightboxIndex ?? 0}
+        onClose={() => setLightboxIndex(null)}
+      />
+    </>
+  )
 }
 
 function makeStyles(c: Colors) {
@@ -167,6 +217,33 @@ function makeStyles(c: Colors) {
     fontFamily: font('600'),
     fontSize: 10,
     fontWeight: '600',
+  },
+  thumbWrap: {
+    position: 'relative',
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    backgroundColor: c.fillQuaternary,
+  },
+  thumb: {
+    width: 40,
+    height: 40,
+  },
+  thumbBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderTopLeftRadius: 4,
+  },
+  thumbBadgeText: {
+    color: '#FFFFFF',
+    fontFamily: font('700'),
+    fontSize: 9,
+    fontWeight: '700',
   },
   })
 }

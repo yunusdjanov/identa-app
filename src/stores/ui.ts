@@ -1,14 +1,23 @@
 import { create } from 'zustand'
+import type { ApiPatient } from '../types'
 
 // Tiny store for cross-component UI flags (sheets opened from the tab bar
 // but mounted elsewhere — e.g. the create-appointment sheet lives near
 // navigation root but is opened from the FAB inside CustomTabBar).
 
+interface OpenCreateAppointmentOpts {
+  date?: string | null
+  // When provided, the sheet opens with this patient pre-selected — saves the
+  // dentist a search step when scheduling from the patient detail screen.
+  patient?: ApiPatient | null
+}
+
 interface UIState {
   // Create-appointment sheet
   createAppointmentOpen: boolean
   createAppointmentDate: string | null  // YYYY-MM-DD
-  openCreateAppointment: (date?: string | null) => void
+  createAppointmentPatient: ApiPatient | null
+  openCreateAppointment: (opts?: OpenCreateAppointmentOpts) => void
   closeCreateAppointment: () => void
 
   // Patient create / edit sheet (null = create, string = edit existing id)
@@ -30,10 +39,19 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
   createAppointmentOpen: false,
   createAppointmentDate: null,
-  openCreateAppointment: (date) =>
-    set({ createAppointmentOpen: true, createAppointmentDate: date ?? null }),
+  createAppointmentPatient: null,
+  openCreateAppointment: (opts) =>
+    set({
+      createAppointmentOpen: true,
+      createAppointmentDate: opts?.date ?? null,
+      createAppointmentPatient: opts?.patient ?? null,
+    }),
   closeCreateAppointment: () =>
-    set({ createAppointmentOpen: false, createAppointmentDate: null }),
+    set({
+      createAppointmentOpen: false,
+      createAppointmentDate: null,
+      createAppointmentPatient: null,
+    }),
 
   patientFormOpen: false,
   patientFormId: null,

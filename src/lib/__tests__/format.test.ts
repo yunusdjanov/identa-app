@@ -10,6 +10,7 @@ import {
   minutesUntil,
   getRelativeBucket,
   getGreetingKey,
+  ageFromDob,
 } from '../format'
 
 describe('formatCurrencyParts', () => {
@@ -192,5 +193,26 @@ describe('getGreetingKey', () => {
   })
   it('returns evening 18+', () => {
     expect(getGreetingKey(new Date(2026, 4, 24, 20))).toBe('evening')
+  })
+})
+
+describe('ageFromDob', () => {
+  it('returns null for null/invalid input', () => {
+    expect(ageFromDob(null)).toBeNull()
+    expect(ageFromDob(new Date('not-a-date'))).toBeNull()
+  })
+
+  it('counts full years when the birthday already passed this year', () => {
+    const now = new Date()
+    // Jan 1 birthday N years ago — always already passed by any later date.
+    expect(ageFromDob(new Date(now.getFullYear() - 30, 0, 1))).toBe(30)
+  })
+
+  it('subtracts a year when the birthday has not occurred yet', () => {
+    const now = new Date()
+    // Dec 31 birthday N years ago — not yet reached unless today is Dec 31.
+    const dob = new Date(now.getFullYear() - 30, 11, 31)
+    const expected = now.getMonth() === 11 && now.getDate() === 31 ? 30 : 29
+    expect(ageFromDob(dob)).toBe(expected)
   })
 })

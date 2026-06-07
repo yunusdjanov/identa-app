@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { View, Text, StyleSheet, Pressable, Alert } from 'react-native'
+import { View, Text, StyleSheet, Pressable } from 'react-native'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 
@@ -9,6 +9,7 @@ import Button from '../ui/Button'
 import Icon from '../ui/Icon'
 import EmptyState from '../ui/EmptyState'
 import { useToast } from '../ui/Toast'
+import { useDialog } from '../ui/Dialog'
 
 import {
   listCategories,
@@ -45,6 +46,7 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const toast = useToast()
+  const { confirm } = useDialog()
   const queryClient = useQueryClient()
 
   const categoriesQuery = useQuery({
@@ -131,18 +133,14 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
     },
   })
 
-  const onDelete = (cat: ApiPatientCategory) => {
-    Alert.alert(t('patients.categories.deleteConfirm'), t('patients.categories.deleteConfirmSub'), [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: t('common.delete'),
-        style: 'destructive',
-        onPress: () => {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-          deleteMutation.mutate(cat.id)
-        },
-      },
-    ])
+  const onDelete = async (cat: ApiPatientCategory) => {
+    const ok = await confirm({
+      title: t('patients.categories.deleteConfirm'),
+      message: t('patients.categories.deleteConfirmSub'),
+      confirmLabel: t('common.delete'),
+      destructive: true,
+    })
+    if (ok) deleteMutation.mutate(cat.id)
   }
 
   const handleSubmit = () => {

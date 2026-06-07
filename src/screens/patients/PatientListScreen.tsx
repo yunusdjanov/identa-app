@@ -7,9 +7,6 @@ import {
   RefreshControl,
   StatusBar,
   Pressable,
-  ActionSheetIOS,
-  Alert,
-  Platform,
   Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -29,6 +26,7 @@ import Icon from '../../components/ui/Icon'
 import { ListRowSkeleton } from '../../components/ui/Skeleton'
 import FadeInRow from '../../components/ui/FadeInRow'
 import { useToast } from '../../components/ui/Toast'
+import { useDialog } from '../../components/ui/Dialog'
 
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
@@ -52,6 +50,7 @@ export default function PatientListScreen() {
   const effective = useThemeStore((s) => s.effective)
   const user = useAuthStore((s) => s.user)
   const toast = useToast()
+  const { actionSheet } = useDialog()
   const navigation = useNavigation<Nav>()
   const openPatientForm = useUIStore((s) => s.openPatientForm)
 
@@ -75,10 +74,27 @@ export default function PatientListScreen() {
     queryFn: () =>
       listPatients({
         search: debouncedSearch.trim() || undefined,
-        category_id: categoryId === 'all' || categoryId === 'archived' ? undefined : categoryId,
+        category_id:
+          categoryId === 'all' || categoryId === 'archived' || categoryId === 'inactive'
+            ? undefined
+            : categoryId,
         // The "archived" chip switches the list to archived-only so the user
         // can find and restore a previously archived patient.
         archived: categoryId === 'archived' ? true : undefined,
+        // The "inactive" chip surfaces patients with no visit in the last 6
+        // months (matches the web's retention-call list). Compute the cutoff
+        // date here so the backend filter is just `filter[inactive_before]`.
+        inactive_before:
+          categoryId === 'inactive'
+            ? (() => {
+                const d = new Date()
+                d.setMonth(d.getMonth() - 6)
+                const y = d.getFullYear()
+                const m = String(d.getMonth() + 1).padStart(2, '0')
+                const day = String(d.getDate()).padStart(2, '0')
+                return `${y}-${m}-${day}`
+              })()
+            : undefined,
         per_page: 100,
       }),
     enabled: canViewPatients,
@@ -116,46 +132,23 @@ export default function PatientListScreen() {
     })
   }
 
-  const onLongPressPatient = (patient: ApiPatient) => {
+  const onLongPressPatient = async (patient: ApiPatient) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-    const labels = {
-      call: t('patients.actions.call'),
-      open: t('patients.actions.open'),
-      edit: t('patients.actions.edit'),
-      cancel: t('common.cancel'),
-    }
-
-    if (Platform.OS === 'ios') {
-      const options: string[] = [labels.call, labels.open]
-      if (canEditPatient) options.push(labels.edit)
-      options.push(labels.cancel)
-      const cancelIdx = options.length - 1
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: patient.full_name,
-          message: patient.phone ?? undefined,
-          options,
-          cancelButtonIndex: cancelIdx,
-        },
-        (idx) => {
-          if (idx === 0) onCallPatient(patient)
-          else if (idx === 1) onOpenPatient(patient.id)
-          else if (idx === 2 && canEditPatient) openPatientForm(patient.id)
-        }
-      )
-      return
-    }
-
-    // Android fallback: Alert.alert with up to 3 buttons
-    const buttons = [
-      { text: labels.call, onPress: () => onCallPatient(patient) },
-      { text: labels.open, onPress: () => onOpenPatient(patient.id) },
+    const options = [
+      { label: t('patients.actions.call'), icon: 'call-outline' as const },
+      { label: t('patients.actions.open'), icon: 'open-outline' as const },
       ...(canEditPatient
-        ? [{ text: labels.edit, onPress: () => openPatientForm(patient.id) }]
+        ? [{ label: t('patients.actions.edit'), icon: 'create-outline' as const }]
         : []),
-      { text: labels.cancel, style: 'cancel' as const },
     ]
-    Alert.alert(patient.full_name, patient.phone ?? undefined, buttons)
+    const idx = await actionSheet({
+      title: patient.full_name,
+      message: patient.phone ?? undefined,
+      options,
+    })
+    if (idx === 0) onCallPatient(patient)
+    else if (idx === 1) onOpenPatient(patient.id)
+    else if (idx === 2 && canEditPatient) openPatientForm(patient.id)
   }
 
   const gradientColors: [string, string, string] =

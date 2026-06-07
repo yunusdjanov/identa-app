@@ -1,6 +1,12 @@
 import client from './client'
 import { requireOnline } from '../lib/offlineGuard'
-import type { ApiPatient, ApiPatientCategory, ApiListResponse, ApiResponse } from '../types'
+import type {
+  ApiAppointment,
+  ApiPatient,
+  ApiPatientCategory,
+  ApiListResponse,
+  ApiResponse,
+} from '../types'
 
 // Per-resource mock flag. Flip via `EXPO_PUBLIC_MOCK_PATIENTS=false`
 // when wiring the real backend for this slice.
@@ -115,6 +121,9 @@ interface ListParams {
   per_page?: number
   category_id?: string
   archived?: boolean
+  // YYYY-MM-DD — filter to patients whose last_visit_at is before this date
+  // (or who have never visited). Used by the "Inactive" list chip.
+  inactive_before?: string
 }
 
 export const listPatients = async (params?: ListParams): Promise<ApiListResponse<ApiPatient>> => {
@@ -141,6 +150,15 @@ export const listPatients = async (params?: ListParams): Promise<ApiListResponse
           p.full_name.toLowerCase().includes(q) ||
           (p.phone?.toLowerCase().includes(q) ?? false)
       )
+    }
+
+    if (params?.inactive_before) {
+      // Patient is "inactive" if their last visit is strictly before the
+      // cutoff, OR they have no recorded visit at all.
+      filtered = filtered.filter((p) => {
+        if (!p.last_visit_at) return true
+        return p.last_visit_at < params.inactive_before!
+      })
     }
 
     const perPage = params?.per_page ?? 10
@@ -170,6 +188,7 @@ export const listPatients = async (params?: ListParams): Promise<ApiListResponse
     realParams['filter[category_id]'] = params.category_id
   }
   if (params?.archived) realParams['filter[archived_only]'] = 1
+  if (params?.inactive_before) realParams['filter[inactive_before]'] = params.inactive_before
   if (params?.page) realParams.page = params.page
   if (params?.per_page) realParams.per_page = params.per_page
 
@@ -183,6 +202,13 @@ export interface ApiPatientOverview {
   total_paid: number
   total_balance: number
   appointment_count: number
+  // Up to 3 upcoming scheduled appointments (oldest first). Backend
+  // PatientService::overview emits this subset of fields — no patient_id /
+  // patient_name since both are known from the parent context.
+  upcoming_appointments?: Pick<
+    ApiAppointment,
+    'id' | 'appointment_date' | 'start_time' | 'end_time' | 'status' | 'notes'
+  >[]
 }
 
 export const getPatient = async (id: string): Promise<ApiPatient> => {
@@ -211,12 +237,29 @@ export const getPatientOverview = async (id: string): Promise<ApiPatientOverview
     const debt = ((seed * 37) % 18) * 150_000
     const paid = Math.round(debt * (0.3 + (seed % 5) * 0.1))
     const balance = debt - paid
+    // 0–2 mock upcoming appointments so the new "Upcoming" section on the
+    // detail screen actually renders something in dev. Deterministic from id.
+    const today = new Date()
+    const fmtDate = (offsetDays: number): string => {
+      const d = new Date(today.getTime() + offsetDays * 86400_000)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+    const upcomingCount = seed % 3 === 0 ? 0 : (seed % 2 === 0 ? 2 : 1)
+    const upcoming = Array.from({ length: upcomingCount }, (_, i) => ({
+      id: `apt-mock-${id}-${i}`,
+      appointment_date: fmtDate(i === 0 ? 1 : 5),
+      start_time: i === 0 ? '10:00' : '14:30',
+      end_time: i === 0 ? '10:30' : '15:00',
+      status: 'scheduled' as const,
+      notes: i === 0 ? 'Konsultatsiya' : 'Plomba qo\'yish',
+    }))
     return mockDelay(
       {
         total_debt: debt,
         total_paid: paid,
         total_balance: balance,
         appointment_count: 3 + (seed % 8),
+        upcoming_appointments: upcoming,
       },
       250
     )
@@ -313,6 +356,14 @@ export const restorePatient = async (id: string): Promise<ApiPatient> => {
   return client
     .post<ApiResponse<ApiPatient>>(`/patients/${id}/restore`)
     .then((r) => r.data.data)
+}
+
+// Permanently delete an archived patient — backend `DELETE /patients/{id}/force`.
+// Irreversible; only offered for already-archived patients in the UI.
+export const forceDeletePatient = async (id: string): Promise<void> => {
+  requireOnline()
+  if (USE_MOCK) return mockDelay(undefined, 400)
+  await client.delete(`/patients/${id}/force`)
 }
 
 export interface PatientPhotoAsset {

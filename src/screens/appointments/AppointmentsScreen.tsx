@@ -464,7 +464,7 @@ export default function AppointmentsScreen() {
                 const dayAppts = appointmentsByDate.get(key) ?? []
                 if (dayAppts.length === 0) {
                   // Empty day → open create sheet prefilled with that date
-                  useUIStore.getState().openCreateAppointment(key)
+                  useUIStore.getState().openCreateAppointment({ date: key })
                 } else {
                   // Has appointments → switch to day mode for that date
                   setSelectedDate(date)
