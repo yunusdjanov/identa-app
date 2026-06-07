@@ -77,6 +77,8 @@ interface TreatmentLike {
   treatment_date?: string | null
   paid_amount?: number | null
   debt_amount?: number | null
+  patient_id?: string | null
+  patient_name?: string | null
 }
 interface PatientLike {
   created_at?: string | null
@@ -166,4 +168,59 @@ export function computeAnalyticsKpis(input: AnalyticsKpiInput): AnalyticsKpis {
       counts: { completed: cCur.completed, total: cCur.total },
     },
   }
+}
+
+export interface StatusCounts {
+  scheduled: number
+  completed: number
+  cancelled: number
+  no_show: number
+}
+
+// Appointment status breakdown WITHIN the selected range (matches web donut).
+export function computeAppointmentStatusCounts(
+  appointments: readonly AppointmentLike[],
+  range: AnalyticsRange,
+  now: Date = new Date()
+): StatusCounts {
+  const b = getRangeBounds(range, now)
+  const counts: StatusCounts = { scheduled: 0, completed: 0, cancelled: 0, no_show: 0 }
+  for (const a of appointments) {
+    if (!withinLocalBounds(a.appointment_date, b.start, b.end)) continue
+    if (a.status && a.status in counts) {
+      counts[a.status as keyof StatusCounts] += 1
+    }
+  }
+  return counts
+}
+
+export interface TopDebtor {
+  patientId: string
+  name: string
+  debt: number
+}
+
+// Top debtors by outstanding balance, counting only treatments whose date sits
+// in the selected range (matches web). Aggregated per patient, desc, capped.
+export function computeTopDebtors(
+  treatments: readonly TreatmentLike[],
+  range: AnalyticsRange,
+  now: Date = new Date(),
+  limit = 5
+): TopDebtor[] {
+  const b = getRangeBounds(range, now)
+  const grouped: Record<string, { name: string; debt: number }> = {}
+  for (const tr of treatments) {
+    if (!withinLocalBounds(tr.treatment_date, b.start, b.end)) continue
+    const debt = outstandingBalance(tr)
+    if (debt <= 0) continue
+    const id = tr.patient_id ?? 'unknown'
+    const existing = grouped[id] ?? { name: tr.patient_name ?? '—', debt: 0 }
+    existing.debt += debt
+    grouped[id] = existing
+  }
+  return Object.entries(grouped)
+    .map(([patientId, v]) => ({ patientId, name: v.name, debt: v.debt }))
+    .sort((a, b2) => b2.debt - a.debt)
+    .slice(0, limit)
 }

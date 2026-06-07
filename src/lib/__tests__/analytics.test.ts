@@ -5,6 +5,8 @@ import {
   getRangeBounds,
   getPreviousRangeBounds,
   computeAnalyticsKpis,
+  computeAppointmentStatusCounts,
+  computeTopDebtors,
 } from '../analytics'
 
 describe('computeDelta', () => {
@@ -103,5 +105,44 @@ describe('computeAnalyticsKpis', () => {
     expect(result.completion.current).toBe(50)
     // previous: May1 done → 100%; delta = (50-100)/100*100
     expect(result.completion.delta).toBe(-50)
+  })
+})
+
+describe('computeAppointmentStatusCounts', () => {
+  const now = new Date(2026, 5, 15, 12, 0, 0)
+  it('counts statuses within the range only', () => {
+    const counts = computeAppointmentStatusCounts(
+      [
+        { appointment_date: '2026-06-10', status: 'completed' },
+        { appointment_date: '2026-06-12', status: 'scheduled' },
+        { appointment_date: '2026-06-13', status: 'cancelled' },
+        { appointment_date: '2026-06-14', status: 'no_show' },
+        { appointment_date: '2026-05-01', status: 'completed' }, // out of 30d range
+      ],
+      '30d',
+      now
+    )
+    expect(counts).toEqual({ scheduled: 1, completed: 1, cancelled: 1, no_show: 1 })
+  })
+})
+
+describe('computeTopDebtors', () => {
+  const now = new Date(2026, 5, 15, 12, 0, 0)
+  it('aggregates outstanding balance per patient, desc, in range', () => {
+    const top = computeTopDebtors(
+      [
+        { treatment_date: '2026-06-10', debt_amount: 1000, paid_amount: 200, patient_id: 'A', patient_name: 'Alice' },
+        { treatment_date: '2026-06-11', debt_amount: 500, paid_amount: 0, patient_id: 'A', patient_name: 'Alice' },
+        { treatment_date: '2026-06-10', debt_amount: 300, paid_amount: 300, patient_id: 'B', patient_name: 'Bob' }, // 0 → excluded
+        { treatment_date: '2026-06-12', debt_amount: 400, paid_amount: 0, patient_id: 'C', patient_name: 'Carol' },
+        { treatment_date: '2026-05-01', debt_amount: 9999, paid_amount: 0, patient_id: 'A', patient_name: 'Alice' }, // out of range
+      ],
+      '30d',
+      now
+    )
+    expect(top).toEqual([
+      { patientId: 'A', name: 'Alice', debt: 1300 },
+      { patientId: 'C', name: 'Carol', debt: 400 },
+    ])
   })
 })

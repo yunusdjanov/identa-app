@@ -7,6 +7,10 @@ export const translations = {
       noBaseline: 'Taqqoslash uchun maʼlumot yoʻq',
       range: { '7d': '7 kun', '30d': '30 kun', '180d': '6 oy', '365d': '12 oy', ytd: 'Yil boshidan' },
       kpi: { revenue: 'Tushum', debt: 'Qarzdorlik', patients: 'Yangi bemorlar', completion: 'Bajarilish' },
+      statusTitle: 'Qabullar holati',
+      status: { scheduled: 'Rejalashtirilgan', completed: 'Bajarilgan', cancelled: 'Bekor qilingan', no_show: 'Kelmagan' },
+      topDebtorsTitle: 'Eng katta qarzdorlar',
+      topDebtorsEmpty: 'Qarzdorlar yoʻq',
     },
     common: {
       save: 'Saqlash',
@@ -844,6 +848,10 @@ export const translations = {
       noBaseline: 'Нет данных для сравнения',
       range: { '7d': '7 дней', '30d': '30 дней', '180d': '6 мес', '365d': '12 мес', ytd: 'С начала года' },
       kpi: { revenue: 'Выручка', debt: 'Задолженность', patients: 'Новые пациенты', completion: 'Завершаемость' },
+      statusTitle: 'Статусы приёмов',
+      status: { scheduled: 'Запланированы', completed: 'Завершены', cancelled: 'Отменены', no_show: 'Не пришли' },
+      topDebtorsTitle: 'Крупнейшие должники',
+      topDebtorsEmpty: 'Должников нет',
     },
     common: {
       save: 'Сохранить',
@@ -1677,6 +1685,10 @@ export const translations = {
       noBaseline: 'No baseline',
       range: { '7d': '7 days', '30d': '30 days', '180d': '6 mo', '365d': '12 mo', ytd: 'Year to date' },
       kpi: { revenue: 'Revenue', debt: 'Outstanding debt', patients: 'New patients', completion: 'Completion rate' },
+      statusTitle: 'Appointment status',
+      status: { scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled', no_show: 'No-show' },
+      topDebtorsTitle: 'Top debtors',
+      topDebtorsEmpty: 'No debtors',
     },
     common: {
       save: 'Save',

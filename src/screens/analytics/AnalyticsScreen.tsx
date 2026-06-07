@@ -18,6 +18,8 @@ import {
   ANALYTICS_RANGES,
   DEFAULT_ANALYTICS_RANGE,
   computeAnalyticsKpis,
+  computeAppointmentStatusCounts,
+  computeTopDebtors,
   type AnalyticsRange,
   type KpiValue,
 } from '../../lib/analytics'
@@ -26,6 +28,14 @@ import type { Locale } from '../../constants'
 import { font, radius, spacing, typography } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import type { MainStackParams } from '../../navigation'
+
+const STATUS_ORDER = ['scheduled', 'completed', 'cancelled', 'no_show'] as const
+const STATUS_COLOR: Record<(typeof STATUS_ORDER)[number], string> = {
+  scheduled: '#3B82F6',
+  completed: '#14B8A6',
+  cancelled: '#94A3B8',
+  no_show: '#F43F5E',
+}
 
 export default function AnalyticsScreen() {
   const { t, locale } = useI18n()
@@ -93,6 +103,15 @@ export default function AnalyticsScreen() {
 
   const revenueParts = formatCurrencyParts(kpis.revenue.current, locale as Locale)
   const debtParts = formatCurrencyParts(kpis.debt.current, locale as Locale)
+
+  const statusCounts = useMemo(
+    () => computeAppointmentStatusCounts(appointmentsQuery.data?.data ?? [], range),
+    [appointmentsQuery.data, range]
+  )
+  const topDebtors = useMemo(
+    () => computeTopDebtors(treatmentsQuery.data?.data ?? [], range),
+    [treatmentsQuery.data, range]
+  )
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -179,6 +198,53 @@ export default function AnalyticsScreen() {
               locked={!canAppointments}
             />
           </View>
+
+          {canAppointments ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>{t('analytics.statusTitle')}</Text>
+              <View style={styles.sectionCard}>
+                {STATUS_ORDER.map((s, i) => (
+                  <View
+                    key={s}
+                    style={[styles.statusRow, i < STATUS_ORDER.length - 1 && styles.rowDivider]}
+                  >
+                    <View style={[styles.dot, { backgroundColor: STATUS_COLOR[s] }]} />
+                    <Text style={styles.statusLabel}>{t(`analytics.status.${s}`)}</Text>
+                    <Text style={styles.statusCount}>{statusCounts[s]}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          {canPayments ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>{t('analytics.topDebtorsTitle')}</Text>
+              {topDebtors.length === 0 ? (
+                <Text style={styles.emptyText}>{t('analytics.topDebtorsEmpty')}</Text>
+              ) : (
+                <View style={styles.sectionCard}>
+                  {topDebtors.map((d, i) => {
+                    const parts = formatCurrencyParts(d.debt, locale as Locale)
+                    return (
+                      <View
+                        key={d.patientId}
+                        style={[styles.debtorRow, i < topDebtors.length - 1 && styles.rowDivider]}
+                      >
+                        <Text style={styles.debtorRank}>{i + 1}</Text>
+                        <Text style={styles.debtorName} numberOfLines={1}>
+                          {d.name}
+                        </Text>
+                        <Text style={styles.debtorDebt}>
+                          {parts.value} {parts.unit}
+                        </Text>
+                      </View>
+                    )
+                  })}
+                </View>
+              )}
+            </View>
+          ) : null}
         </ScrollView>
       )}
     </View>
@@ -284,5 +350,30 @@ function makeStyles(c: Colors) {
     deltaNeutral: { ...typography.caption1, color: c.labelTertiary },
     lockRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     lockedValue: { ...typography.subhead, color: c.labelTertiary },
+    section: { marginTop: spacing.lg, gap: spacing.sm },
+    sectionTitle: { ...typography.headline, color: c.label, paddingHorizontal: 2 },
+    sectionCard: {
+      backgroundColor: c.background,
+      borderRadius: radius.xl,
+      borderWidth: 1,
+      borderColor: c.separator as string,
+      paddingHorizontal: spacing.md,
+    },
+    rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.separator as string },
+    statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
+    dot: { width: 10, height: 10, borderRadius: 5 },
+    statusLabel: { flex: 1, ...typography.body, color: c.label },
+    statusCount: { ...typography.body, color: c.labelSecondary, fontFamily: font('700'), fontWeight: '700' },
+    debtorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
+    debtorRank: {
+      width: 22,
+      ...typography.footnote,
+      color: c.labelTertiary,
+      fontFamily: font('700'),
+      fontWeight: '700',
+    },
+    debtorName: { flex: 1, ...typography.body, color: c.label },
+    debtorDebt: { ...typography.subhead, color: c.danger, fontFamily: font('700'), fontWeight: '700' },
+    emptyText: { ...typography.subhead, color: c.labelTertiary, paddingHorizontal: 2 },
   })
 }
