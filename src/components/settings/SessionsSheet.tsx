@@ -75,6 +75,7 @@ export default function SessionsSheet({ visible, onClose }: Props) {
       visible={visible}
       onClose={onClose}
       title={t('settings.sessionsSheet.title')}
+      closeAccessibilityLabel={t('common.close')}
     >
       <Text style={styles.subtitle}>{t('settings.sessionsSheet.subtitle')}</Text>
 

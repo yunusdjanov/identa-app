@@ -7,6 +7,7 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "environment": "development",
       "channel": "development",
       "ios": {
         "resourceClass": "m-medium",
@@ -17,13 +18,12 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.identa.uz/api/v1",
-        "EXPO_PUBLIC_USE_MOCK_API": "false",
-        "EXPO_PUBLIC_SENTRY_DSN": "$EXPO_PUBLIC_SENTRY_DSN",
-        "SENTRY_AUTH_TOKEN": "$SENTRY_AUTH_TOKEN"
+        "EXPO_PUBLIC_USE_MOCK_API": "false"
       }
     },
     "preview": {
       "distribution": "internal",
+      "environment": "preview",
       "channel": "preview",
       "ios": {
         "resourceClass": "m-medium",
@@ -34,13 +34,12 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.identa.uz/api/v1",
-        "EXPO_PUBLIC_USE_MOCK_API": "false",
-        "EXPO_PUBLIC_SENTRY_DSN": "$EXPO_PUBLIC_SENTRY_DSN",
-        "SENTRY_AUTH_TOKEN": "$SENTRY_AUTH_TOKEN"
+        "EXPO_PUBLIC_USE_MOCK_API": "false"
       }
     },
     "production": {
       "autoIncrement": true,
+      "environment": "production",
       "channel": "production",
       "ios": {
         "resourceClass": "m-medium"
@@ -50,9 +49,15 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.identa.uz/api/v1",
-        "EXPO_PUBLIC_USE_MOCK_API": "false",
-        "EXPO_PUBLIC_SENTRY_DSN": "$EXPO_PUBLIC_SENTRY_DSN",
-        "SENTRY_AUTH_TOKEN": "$SENTRY_AUTH_TOKEN"
+        "EXPO_PUBLIC_USE_MOCK_API": "false"
+      }
+    },
+    "production-apk": {
+      "extends": "production",
+      "distribution": "internal",
+      "environment": "production",
+      "android": {
+        "buildType": "apk"
       }
     }
   },

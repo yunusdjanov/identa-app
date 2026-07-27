@@ -32,8 +32,11 @@ interface UIState {
   // the user was viewing (e.g. created from Dashboard while on Sunday but
   // for next Monday). AppointmentsScreen consumes + clears it.
   pendingAppointmentsViewDate: string | null  // YYYY-MM-DD
+  pendingAppointmentsViewId: string | null
   requestAppointmentsViewDate: (date: string) => void
+  requestAppointmentsViewAppointment: (date: string, appointmentId: string) => void
   clearAppointmentsViewDate: () => void
+  clearAppointmentsViewRequest: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -61,6 +64,15 @@ export const useUIStore = create<UIState>((set) => ({
     set({ patientFormOpen: false, patientFormId: null }),
 
   pendingAppointmentsViewDate: null,
-  requestAppointmentsViewDate: (date) => set({ pendingAppointmentsViewDate: date }),
+  pendingAppointmentsViewId: null,
+  requestAppointmentsViewDate: (date) =>
+    set({ pendingAppointmentsViewDate: date, pendingAppointmentsViewId: null }),
+  requestAppointmentsViewAppointment: (date, appointmentId) =>
+    set({
+      pendingAppointmentsViewDate: date,
+      pendingAppointmentsViewId: appointmentId,
+    }),
   clearAppointmentsViewDate: () => set({ pendingAppointmentsViewDate: null }),
+  clearAppointmentsViewRequest: () =>
+    set({ pendingAppointmentsViewDate: null, pendingAppointmentsViewId: null }),
 }))

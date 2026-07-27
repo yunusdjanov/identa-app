@@ -2,7 +2,6 @@ import React, { createContext, useContext, useEffect, useState, useMemo, useCall
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { translations } from './translations'
 import { DEFAULT_LOCALE, type Locale } from '../constants'
-import { setNotificationLocale } from '../lib/notifications'
 import { setCurrentLocale } from '../lib/currentLocale'
 
 const LOCALE_STORAGE_KEY = '@identa/locale'
@@ -11,6 +10,7 @@ type Dict = typeof translations.uz
 
 interface I18nContextValue {
   locale: Locale
+  isHydrating: boolean
   setLocale: (locale: Locale) => void
   t: (path: string, vars?: Record<string, string | number>) => string
 }
@@ -43,6 +43,7 @@ export function I18nProvider({
   defaultLocale?: Locale
 }) {
   const [locale, setLocaleState] = useState<Locale>(defaultLocale ?? DEFAULT_LOCALE)
+  const [isHydrating, setIsHydrating] = useState(!defaultLocale)
 
   // Persist the chosen language so it survives cold starts. Web persists the
   // locale via cookie; mobile previously reset to DEFAULT_LOCALE every launch.
@@ -63,6 +64,9 @@ export function I18nProvider({
         }
       })
       .catch(() => {})
+      .finally(() => {
+        if (active) setIsHydrating(false)
+      })
     return () => {
       active = false
     }
@@ -78,15 +82,16 @@ export function I18nProvider({
     [dict]
   )
 
-  // Keep non-React modules (notification scheduler, mutation cache toast)
-  // in sync with the current locale so messages they produce use the
-  // right language.
+  // Keep non-React modules (API errors and mutation-cache toasts) in sync
+  // with the selected language.
   useEffect(() => {
-    setNotificationLocale(locale)
     setCurrentLocale(locale)
   }, [locale])
 
-  const value = useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t])
+  const value = useMemo(
+    () => ({ locale, isHydrating, setLocale, t }),
+    [isHydrating, locale, setLocale, t]
+  )
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
 }
 

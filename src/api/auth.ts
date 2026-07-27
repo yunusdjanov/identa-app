@@ -1,16 +1,17 @@
 import client from './client'
+import { shouldUseMockApi } from '../lib/mockApi'
 import { acquireCsrf, clearCsrf, csrfHeaders } from './csrf'
 import { DEVICE_NAME } from '../constants'
 import type { ApiUser } from '../types'
 import type { AuthTokens } from '../stores/auth'
 
-// Per-resource mock flag. `EXPO_PUBLIC_USE_MOCK_API=false` disables ALL
-// mocks app-wide; `EXPO_PUBLIC_MOCK_AUTH=false` flips just the auth slice
-// while the rest stay mocked. Useful for incremental migration where
-// auth lands first and the rest follow.
+// Production-safe default: mock data is opt-in. A resource-level flag wins;
+// otherwise the global mock switch must explicitly be `true`.
 const USE_MOCK =
-  process.env.EXPO_PUBLIC_MOCK_AUTH !== 'false' &&
-  process.env.EXPO_PUBLIC_USE_MOCK_API !== 'false'
+  shouldUseMockApi(
+    process.env.EXPO_PUBLIC_MOCK_AUTH,
+    process.env.EXPO_PUBLIC_USE_MOCK_API
+  )
 
 function mockDelay<T>(value: T, ms = 700): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms))
@@ -41,6 +42,7 @@ function mockUser(email: string, name: string): ApiUser {
       days_remaining: 30,
       staff_limit: 3,
       active_staff_count: 1,
+      can_export: true,
       trial_ends_at: new Date(Date.now() + 30 * 86400_000).toISOString(),
     },
   }
@@ -108,7 +110,8 @@ export const logout = async () => {
 
 export const getCurrentUser = async (): Promise<ApiUser> => {
   if (USE_MOCK) {
-    return mockDelay(mockUser('me@identa.uz', 'Identa User'))
+    const { useAuthStore } = require('../stores/auth') as typeof import('../stores/auth')
+    return mockDelay(useAuthStore.getState().user ?? mockUser('me@identa.uz', 'Identa User'))
   }
   return client.get<{ data: ApiUser }>('/auth/me').then((r) => r.data.data)
 }
@@ -120,22 +123,41 @@ interface RegisterPayload {
   password_confirmation: string
 }
 
-// Note: register on the backend does NOT issue mobile tokens by default
-// (only login does). So after a successful register the caller must
-// explicitly log in to obtain tokens. The mock skips this nuance.
-export const register = async (payload: RegisterPayload): Promise<ApiUser> => {
+interface RegisterResult {
+  user: ApiUser
+  tokens?: AuthTokens
+}
+
+// Mobile registration asks the backend for tokens in the same response.
+// `tokens` stays optional during rollout so older backends can fall back to
+// one explicit login without misreporting account creation as failed.
+export const register = async (payload: RegisterPayload): Promise<RegisterResult> => {
   if (USE_MOCK) {
     if (!payload.email || payload.password.length < 8) {
       throw new Error('Invalid input')
     }
-    return mockDelay<ApiUser>(mockUser(payload.email, payload.name))
+    return mockDelay<RegisterResult>({
+      user: mockUser(payload.email, payload.name),
+      tokens: mockTokens(),
+    })
   }
   // `web` middleware → CSRF required. Same dance as login.
   const handshake = await acquireCsrf()
-  const response = await client.post<{ data: ApiUser }>('/auth/register', payload, {
-    headers: csrfHeaders(handshake),
-  })
-  return response.data.data
+  const response = await client.post<{ data: ApiUser & { tokens?: AuthTokens } }>(
+    '/auth/register',
+    {
+      ...payload,
+      device_name: DEVICE_NAME,
+      terms_accepted: true,
+      privacy_accepted: true,
+    },
+    { headers: csrfHeaders(handshake) }
+  )
+  // Registration rotates Laravel's session id. Never reuse the pre-register
+  // handshake for the compatibility login fallback.
+  clearCsrf()
+  const { tokens, ...user } = response.data.data
+  return { user: user as ApiUser, tokens }
 }
 
 // Resend the email-verification link to the signed-in user. Backend:
@@ -161,6 +183,12 @@ export const resetPassword = async (
   password: string,
   password_confirmation: string
 ) => {
+  if (USE_MOCK) {
+    if (!token || !email || password.length < 8 || password !== password_confirmation) {
+      throw new Error('Invalid password reset input')
+    }
+    return mockDelay(undefined, 700)
+  }
   const handshake = await acquireCsrf()
   return client.post(
     '/auth/reset-password',
@@ -175,7 +203,7 @@ interface ChangePasswordPayload {
   new_password_confirmation: string
 }
 
-export const changeCurrentPassword = async (payload: ChangePasswordPayload) => {
+export const changeCurrentPassword = async (payload: ChangePasswordPayload): Promise<ApiUser | null> => {
   if (USE_MOCK) {
     if (payload.new_password.length < 8) {
       throw new Error('Password too short')
@@ -183,13 +211,15 @@ export const changeCurrentPassword = async (payload: ChangePasswordPayload) => {
     if (payload.new_password !== payload.new_password_confirmation) {
       throw new Error('Mismatch')
     }
-    return mockDelay(undefined, 600)
+    return mockDelay(null, 600)
   }
   // Also `web` middleware. Fresh handshake — the post-login session cookie
   // was cleared on login; cached value (if any) is from this user's session
   // boundary and may already be invalid.
   const handshake = await acquireCsrf(true)
-  return client.post('/auth/change-password', payload, {
-    headers: csrfHeaders(handshake),
-  })
+  return client
+    .post<{ data: ApiUser }>('/auth/change-password', payload, {
+      headers: csrfHeaders(handshake),
+    })
+    .then((response) => response.data.data)
 }

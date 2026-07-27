@@ -1,149 +1,178 @@
 import React, { useMemo } from 'react'
-import { View, Text, StyleSheet, Pressable, Animated } from 'react-native'
-import * as Haptics from 'expo-haptics'
+import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+
 import { useI18n } from '../../i18n'
-import Icon from '../ui/Icon'
-import { radius, font, shadows } from '../../constants/theme'
-import { useColors, type Colors } from '../../lib/useColors'
 import { formatTime, formatWeekdayShort, isSameDay } from '../../lib/format'
+import { font, radius } from '../../constants/theme'
+import { useColors, type Colors } from '../../lib/useColors'
 import type { ApiAppointment } from '../../types'
 
 interface Props {
   date: Date
   appointments: ApiAppointment[]
   onPress: () => void
+  side: 'left' | 'right'
 }
 
-const MAX_VISIBLE = 8
-const CARD_MIN_HEIGHT = 260
+export const PLANNER_PAPER_LINE_COUNT = 10
+const PLANNER_ROW_HORIZONTAL_INSET = 10
+const PLANNER_PAGE_SHADOW = {
+  shadowColor: '#000000',
+  shadowOpacity: 0.055,
+  shadowRadius: 8,
+  shadowOffset: { width: 0, height: 3 },
+  elevation: 2,
+} as const
+export const PLANNER_DATE_RAIL_HEIGHT = 112
+export const PLANNER_DATE_RAIL_WIDTH = 28
+const PLANNER_DATE_RAIL_OUTER_GUTTER = 2
+export const PLANNER_CARD_HEIGHT = 212
+const PLANNER_PAGE_VERTICAL_MARGIN = 3
+export const PLANNER_APPOINTMENT_ROW_HEIGHT =
+  (PLANNER_CARD_HEIGHT -
+    PLANNER_PAGE_VERTICAL_MARGIN * 2 -
+    StyleSheet.hairlineWidth * 2) /
+  PLANNER_PAPER_LINE_COUNT
 
-// Compact day card used in week-grid view. Fixed minHeight so empty days
-// stay the same size as full days (uniform grid). Shows up to 8 appointments
-// in a single line each, with "+N more" overflow indicator.
-export default function DayMiniCard({ date, appointments, onPress }: Props) {
+export default function DayMiniCard({ date, appointments, onPress, side }: Props) {
   const { t, locale } = useI18n()
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const isToday = isSameDay(date, new Date())
 
-  const STATUS_COLOR: Record<ApiAppointment['status'], string> = {
-    scheduled: c.scheduled,
-    completed: c.completed,
-    cancelled: c.cancelled,
-    no_show: c.no_show,
-  }
-
-  const sorted = React.useMemo(
-    () =>
-      [...appointments].sort((a, b) => a.start_time.localeCompare(b.start_time)),
+  const sorted = useMemo(
+    () => [...appointments].sort((a, b) => a.start_time.localeCompare(b.start_time)),
     [appointments]
   )
-
-  const visible = sorted.slice(0, MAX_VISIBLE)
-  const overflow = Math.max(0, sorted.length - MAX_VISIBLE)
-  const isEmpty = sorted.length === 0
-
   const scale = React.useRef(new Animated.Value(1)).current
-  const onPressIn = () => {
-    Animated.spring(scale, {
-      toValue: 0.97,
-      useNativeDriver: true,
-      speed: 50,
-      bounciness: 0,
-    }).start()
-  }
-  const onPressOut = () => {
-    Animated.spring(scale, {
-      toValue: 1,
-      useNativeDriver: true,
-      speed: 50,
-      bounciness: 6,
-    }).start()
-  }
+
+  const month = new Intl.DateTimeFormat(
+    locale === 'uz' ? 'uz-UZ' : locale === 'ru' ? 'ru-RU' : 'en-US',
+    { month: 'short' }
+  )
+    .format(date)
+    .replace('.', '')
 
   const handlePress = () => {
-    Haptics.selectionAsync()
     onPress()
   }
 
   return (
-    <Animated.View style={{ flex: 1, transform: [{ scale }] }}>
+    <Animated.View style={[styles.flex, { transform: [{ scale }] }]}>
       <Pressable
         onPress={handlePress}
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
-        style={[styles.card, shadows.sm]}
+        onPressIn={() => {
+          Animated.spring(scale, {
+            toValue: 0.985,
+            useNativeDriver: true,
+            speed: 50,
+            bounciness: 0,
+          }).start()
+        }}
+        onPressOut={() => {
+          Animated.spring(scale, {
+            toValue: 1,
+            useNativeDriver: true,
+            speed: 50,
+            bounciness: 4,
+          }).start()
+        }}
+        style={styles.card}
+        accessibilityRole="button"
+        accessibilityLabel={`${formatWeekdayShort(date, locale)} ${date.getDate()}, ${t(
+          'appointments.planner.count',
+          { n: appointments.length }
+        )}`}
       >
-        {/* Header — single compact row */}
-        <View style={[styles.header, isToday && styles.headerToday]}>
-          <View style={styles.headerLeft}>
-            <Text style={[styles.weekday, isToday && styles.weekdayToday]}>
+        <View style={[styles.cardSurface, side === 'right' && styles.cardRight]}>
+          <View
+            testID="planner-date-rail"
+            style={[
+              styles.dateRail,
+              isToday && styles.dateRailToday,
+              side === 'left' ? styles.dateRailLeft : styles.dateRailRight,
+            ]}
+          >
+            <Text
+              maxFontSizeMultiplier={1.25}
+              style={[styles.weekday, isToday && styles.dateRailMetaToday]}
+            >
               {formatWeekdayShort(date, locale).slice(0, 3)}
             </Text>
-            <Text style={[styles.dayNumber, isToday && styles.dayNumberToday]}>
-              {date.getDate()}
-            </Text>
-            {isToday ? (
-              <View style={styles.todayBadge}>
-                <Text style={styles.todayBadgeText}>{t('appointments.todayBadge')}</Text>
-              </View>
-            ) : null}
-          </View>
-          <Icon
-            name="expand-outline"
-            size={13}
-            color={isToday ? 'rgba(255,255,255,0.85)' : (c.labelTertiary as string)}
-          />
-        </View>
-
-        {/* Body */}
-        <View style={styles.body}>
-          {isEmpty ? (
-            <View style={styles.emptyBody}>
-              <View style={styles.emptyIconWrap}>
-                <Icon
-                  name="add"
-                  size={20}
-                  color={isToday ? (c.brand as string) : (c.labelTertiary as string)}
-                />
-              </View>
+            <View style={styles.dayNumberBadge}>
+              <Text
+                maxFontSizeMultiplier={1.25}
+                style={[styles.dayNumber, isToday && styles.dayNumberToday]}
+              >
+                {date.getDate()}
+              </Text>
             </View>
-          ) : (
-            <View style={styles.appointmentsList}>
-              {visible.map((apt) => (
-                <View key={apt.id} style={styles.aptRow}>
-                  <View
-                    style={[
-                      styles.aptDot,
-                      { backgroundColor: STATUS_COLOR[apt.status] },
-                      apt.status === 'cancelled' && { opacity: 0.5 },
-                    ]}
-                  />
-                  <Text style={styles.aptTime}>{formatTime(apt.start_time)}</Text>
-                  <Text
-                    style={[
-                      styles.aptName,
-                      apt.status === 'cancelled' && styles.aptNameStruck,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {apt.patient_name || '—'}
-                  </Text>
-                </View>
+            <Text
+              maxFontSizeMultiplier={1.25}
+              style={[styles.month, isToday && styles.dateRailMetaToday]}
+            >
+              {month}
+            </Text>
+          </View>
+
+          <View style={[styles.page, PLANNER_PAGE_SHADOW]}>
+            <View
+              style={styles.paperLines}
+              pointerEvents="none"
+              testID="planner-paper-lines"
+            >
+              {Array.from({ length: PLANNER_PAPER_LINE_COUNT }).map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.paperLine,
+                    index === PLANNER_PAPER_LINE_COUNT - 1 && styles.paperLineLast,
+                  ]}
+                  testID="planner-paper-line"
+                />
               ))}
             </View>
-          )}
-        </View>
-
-        {/* Edge-to-edge overflow footer */}
-        {overflow > 0 ? (
-          <View style={styles.moreFooter}>
-            <Text style={styles.moreText}>
-              {t('appointments.moreCount', { n: overflow })}
-            </Text>
-            <Icon name="chevron-forward" size={12} color={c.brand as string} />
+            {sorted.length > 0 && (
+              <ScrollView
+                testID="planner-appointment-scroll"
+                style={styles.appointmentScroll}
+                contentContainerStyle={styles.appointmentContent}
+                scrollEnabled={sorted.length > PLANNER_PAPER_LINE_COUNT}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={sorted.length > PLANNER_PAPER_LINE_COUNT}
+              >
+                {sorted.map((appointment) => (
+                  <View
+                    key={appointment.id}
+                    testID="planner-appointment-row"
+                    style={[
+                      styles.appointmentRow,
+                      (appointment.status === 'cancelled' ||
+                        appointment.status === 'no_show') &&
+                        styles.appointmentRowMuted,
+                    ]}
+                  >
+                    <Text maxFontSizeMultiplier={1.25} style={styles.appointmentTime}>
+                      {formatTime(appointment.start_time)}
+                    </Text>
+                    <View
+                      style={styles.appointmentDivider}
+                      pointerEvents="none"
+                      testID="planner-appointment-divider"
+                    />
+                    <Text
+                      maxFontSizeMultiplier={1.25}
+                      style={styles.patientName}
+                      numberOfLines={1}
+                    >
+                      {appointment.patient_name || appointment.guest_name || '—'}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
           </View>
-        ) : null}
+        </View>
       </Pressable>
     </Animated.View>
   )
@@ -151,149 +180,164 @@ export default function DayMiniCard({ date, appointments, onPress }: Props) {
 
 function makeStyles(c: Colors) {
   return StyleSheet.create({
-    card: {
+    flex: {
       flex: 1,
-      // Single elevated surface — no nested fill colors. Body, header, and
-      // footer share the same background so the card reads as one unified
-      // panel rather than a stack of brand-tinted slabs.
-      backgroundColor: c.backgroundSecondary,
-      borderRadius: radius.xl,
-      overflow: 'hidden',
-      minHeight: CARD_MIN_HEIGHT,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.separator as string,
+      minWidth: 0,
     },
-    header: {
+    card: {
+      height: PLANNER_CARD_HEIGHT,
+      overflow: 'visible',
+      borderRadius: radius.xxl,
+      backgroundColor: 'transparent',
+    },
+    cardSurface: {
+      flex: 1,
       flexDirection: 'row',
-      justifyContent: 'space-between',
+      overflow: 'visible',
+      backgroundColor: 'transparent',
+    },
+    cardRight: {
+      flexDirection: 'row-reverse',
+    },
+    dateRail: {
+      width: PLANNER_DATE_RAIL_WIDTH,
+      height: PLANNER_DATE_RAIL_HEIGHT,
+      alignSelf: 'center',
       alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 9,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.separator as string,
+      backgroundColor: c.brandSurface,
+      justifyContent: 'center',
+      gap: 1,
+      borderWidth: 1,
+      borderColor: c.brandSoft,
+      zIndex: 3,
     },
-    // Today gets the only brand accent in the whole card: a saturated
-    // header. Body + footer stay neutral so the card has one focal point.
-    headerToday: {
+    dateRailLeft: {
+      marginLeft: PLANNER_DATE_RAIL_OUTER_GUTTER,
+      marginRight: -StyleSheet.hairlineWidth,
+      borderRightWidth: 1,
+      borderRightColor: c.brandSoft,
+      borderTopLeftRadius: radius.md,
+      borderBottomLeftRadius: radius.md,
+    },
+    dateRailRight: {
+      marginLeft: -StyleSheet.hairlineWidth,
+      marginRight: PLANNER_DATE_RAIL_OUTER_GUTTER,
+      borderLeftWidth: 1,
+      borderLeftColor: c.brandSoft,
+      borderTopRightRadius: radius.md,
+      borderBottomRightRadius: radius.md,
+    },
+    dateRailToday: {
       backgroundColor: c.brand,
-      borderBottomColor: c.brand,
-    },
-    headerLeft: {
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      gap: 6,
+      borderColor: c.brand,
     },
     weekday: {
       fontFamily: font('700'),
-      fontSize: 11,
+      fontSize: 9,
+      lineHeight: 11,
       fontWeight: '700',
-      color: c.labelSecondary,
+      color: c.brand,
       textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    weekdayToday: {
-      color: 'rgba(255,255,255,0.9)',
+      letterSpacing: 0.45,
     },
     dayNumber: {
-      fontFamily: font('700'),
-      fontSize: 18,
-      fontWeight: '700',
-      color: c.label,
-      letterSpacing: -0.3,
+      fontFamily: font('800'),
+      fontSize: 16,
+      lineHeight: 20,
+      fontWeight: '800',
+      color: c.brandDeep,
+    },
+    dayNumberBadge: {
+      width: 22,
+      height: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.pill,
     },
     dayNumberToday: {
       color: '#FFFFFF',
     },
-    todayBadge: {
-      marginLeft: 4,
-      paddingHorizontal: 6,
-      paddingVertical: 1,
-      borderRadius: 4,
-      backgroundColor: 'rgba(255,255,255,0.22)',
-    },
-    todayBadgeText: {
-      fontFamily: font('800'),
-      fontSize: 9,
-      fontWeight: '800',
-      color: '#FFFFFF',
-      letterSpacing: 0.6,
-    },
-    // Body is intentionally bg-less — it inherits the card surface. The
-    // earlier brandLight wash for today was fighting the brand header.
-    //
-    // NOTE: appointments anchor to the TOP of the body (`flex-start`) so
-    // a card with fewer items doesn't visually "sink" relative to its
-    // taller neighbor — both cards in a row read as left-aligned lists.
-    // The empty-state icon centers itself via its own `flex: 1` wrapper.
-    body: {
-      flex: 1,
-      paddingHorizontal: 10,
-      paddingVertical: 10,
-      justifyContent: 'flex-start',
-    },
-    appointmentsList: {
-      gap: 5,
-    },
-    aptRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 7,
-    },
-    aptDot: {
-      width: 7,
-      height: 7,
-      borderRadius: 3.5,
-    },
-    aptTime: {
-      fontFamily: font('700'),
-      fontSize: 11.5,
-      fontWeight: '700',
-      color: c.label,
-      letterSpacing: -0.1,
-      minWidth: 36,
-    },
-    aptName: {
-      flex: 1,
+    month: {
       fontFamily: font('500'),
-      fontSize: 11.5,
+      fontSize: 9,
+      lineHeight: 11,
       fontWeight: '500',
-      color: c.labelSecondary,
+      color: c.brand,
+      textTransform: 'capitalize',
     },
-    aptNameStruck: {
-      textDecorationLine: 'line-through',
-      color: c.labelTertiary,
+    dateRailMetaToday: {
+      color: 'rgba(255, 255, 255, 0.84)',
     },
-    // Footer inherits the card surface too. A hairline rule + brand-colored
-    // label is enough signal; no full-bleed fill needed.
-    moreFooter: {
+    page: {
+      flex: 1,
+      minWidth: 0,
+      padding: 0,
+      marginVertical: PLANNER_PAGE_VERTICAL_MARGIN,
+      marginHorizontal: 0,
+      overflow: 'hidden',
+      borderRadius: radius.xl,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.fillTertiary as string,
+      backgroundColor: c.backgroundTertiary,
+      zIndex: 2,
+    },
+    paperLines: {
+      ...StyleSheet.absoluteFillObject,
+      top: 0,
+      bottom: 0,
+      paddingHorizontal: PLANNER_ROW_HORIZONTAL_INSET,
+      opacity: 0.34,
+    },
+    paperLine: {
+      flex: 1,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.separator as string,
+    },
+    paperLineLast: {
+      // The page border already closes the final slot. A second line here
+      // makes the bottom row look optically shorter than the other nine.
+      borderBottomWidth: 0,
+    },
+    appointmentScroll: {
+      flex: 1,
+      zIndex: 1,
+    },
+    appointmentContent: {
+      flexGrow: 1,
+    },
+    appointmentRow: {
+      height: PLANNER_APPOINTMENT_ROW_HEIGHT,
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
-      gap: 3,
-      paddingVertical: 8,
-      paddingHorizontal: 8,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: c.separator as string,
+      gap: 4,
+      paddingHorizontal: PLANNER_ROW_HORIZONTAL_INSET,
     },
-    moreText: {
+    appointmentRowMuted: {
+      opacity: 0.5,
+    },
+    appointmentTime: {
       fontFamily: font('700'),
-      fontSize: 11,
+      fontSize: 9,
       fontWeight: '700',
       color: c.brand,
-      letterSpacing: 0.1,
+      width: 30,
+      textAlign: 'right',
     },
-    emptyBody: {
+    appointmentDivider: {
+      width: 1,
+      height: 12,
+      borderRadius: 1,
+      backgroundColor: c.brand,
+      opacity: 0.34,
+    },
+    patientName: {
       flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    emptyIconWrap: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: c.fillQuaternary,
-      alignItems: 'center',
-      justifyContent: 'center',
+      minWidth: 0,
+      fontFamily: font('700'),
+      fontSize: 9,
+      lineHeight: 12,
+      fontWeight: '700',
+      color: c.label,
     },
   })
 }

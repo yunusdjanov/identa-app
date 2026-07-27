@@ -1,4 +1,5 @@
 import React from 'react'
+import { StyleSheet } from 'react-native'
 import { fireEvent } from '@testing-library/react-native'
 import PhotoGallery, { type GalleryPhoto } from '../PhotoGallery'
 import { renderWithProviders } from '../../../test-utils/renderWithProviders'
@@ -49,10 +50,10 @@ describe('<PhotoGallery />', () => {
   it('fires onPressPhoto with the correct index when a thumbnail is tapped', () => {
     const onPressPhoto = jest.fn()
     const photos = [remote('a'), remote('b'), remote('c')]
-    const { getByTestId } = renderWithProviders(
+    const { getByLabelText } = renderWithProviders(
       <PhotoGallery photos={photos} onPressPhoto={onPressPhoto} />
     )
-    fireEvent.press(getByTestId('gallery-thumb-1'))
+    fireEvent.press(getByLabelText('2-rasmni ochish'))
     expect(onPressPhoto).toHaveBeenCalledWith(1)
   })
 
@@ -71,5 +72,16 @@ describe('<PhotoGallery />', () => {
       <PhotoGallery photos={[remote('a')]} bare />
     )
     expect(queryByText('Suratlar')).toBeNull()
+  })
+
+  it('uses the intermediate 76px tile in dense forms', () => {
+    const { getByTestId } = renderWithProviders(
+      <PhotoGallery photos={[]} onPressAdd={() => {}} size="form" bare />
+    )
+
+    expect(StyleSheet.flatten(getByTestId('gallery-add-tile').props.style)).toMatchObject({
+      width: 76,
+      height: 76,
+    })
   })
 })

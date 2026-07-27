@@ -38,9 +38,9 @@ interface Props {
   onRemovePhoto?: (photo: GalleryPhoto) => void
   // Optional cap to show a "max reached" label and hide the add tile.
   maxPhotos?: number
-  // Compact = smaller thumbnails (used in detail sheet preview), default =
-  // standard size (used in create/edit form).
-  size?: 'compact' | 'default'
+  // `form` sits between detail previews and the full gallery size so dense
+  // create/edit sheets stay compact without shrinking tap targets too far.
+  size?: 'compact' | 'form' | 'default'
   // Hides the surrounding header / hint text — useful when embedding inside
   // an already-titled section.
   bare?: boolean
@@ -80,8 +80,18 @@ export default function PhotoGallery({
         contentContainerStyle={styles.scrollContent}
       >
         {canAdd ? (
-          <Pressable style={styles.addTile} onPress={onPressAdd} accessibilityRole="button">
-            <Icon name="add" size={size === 'compact' ? 24 : 28} color={c.brand as string} />
+          <Pressable
+            style={styles.addTile}
+            onPress={onPressAdd}
+            accessibilityRole="button"
+            accessibilityLabel={t('gallery.add')}
+            testID="gallery-add-tile"
+          >
+            <Icon
+              name="add"
+              size={size === 'compact' ? 24 : size === 'form' ? 25 : 28}
+              color={c.brand as string}
+            />
             <Text style={styles.addLabel}>{t('gallery.add')}</Text>
           </Pressable>
         ) : null}
@@ -95,6 +105,7 @@ export default function PhotoGallery({
                 style={styles.thumb}
                 onPress={() => onPressPhoto?.(idx)}
                 accessibilityRole="button"
+                accessibilityLabel={t('gallery.openPhoto', { number: idx + 1 })}
                 testID={`gallery-thumb-${idx}`}
               >
                 <Image
@@ -119,7 +130,7 @@ export default function PhotoGallery({
                 <Pressable
                   style={styles.removeBtn}
                   onPress={() => onRemovePhoto(p)}
-                  hitSlop={6}
+                  hitSlop={11}
                   accessibilityRole="button"
                   accessibilityLabel={t('gallery.remove')}
                 >
@@ -141,8 +152,8 @@ export default function PhotoGallery({
   )
 }
 
-function makeStyles(c: Colors, size: 'compact' | 'default') {
-  const tile = size === 'compact' ? 64 : 88
+function makeStyles(c: Colors, size: 'compact' | 'form' | 'default') {
+  const tile = size === 'compact' ? 64 : size === 'form' ? 76 : 88
   return StyleSheet.create({
     wrap: {
       gap: spacing.sm,

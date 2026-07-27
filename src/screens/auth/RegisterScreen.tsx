@@ -24,7 +24,6 @@ import Brand from '../../components/ui/Brand'
 import Button from '../../components/ui/Button'
 import InputCard from '../../components/ui/InputCard'
 import LanguageSwitcher from '../../components/ui/LanguageSwitcher'
-import GoogleMark from '../../components/ui/GoogleMark'
 import Icon from '../../components/ui/Icon'
 import Checkbox from '../../components/ui/Checkbox'
 import PasswordStrengthMeter from '../../components/ui/PasswordStrengthMeter'
@@ -35,10 +34,13 @@ import { useColors, type Colors } from '../../lib/useColors'
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
 import { register as registerApi, login as loginApi } from '../../api/auth'
+import { isApiError } from '../../api/client'
 import { validateEmail, validatePassword, INPUT_LIMITS } from '../../lib/validation'
+import { getAuthErrorMessage } from '../../lib/authErrorMessage'
 import type { AuthStackParams } from '../../navigation'
 
 type Nav = NativeStackNavigationProp<AuthStackParams, 'Register'>
+type ServerErrorField = 'name' | 'email' | 'password' | 'password_confirmation' | 'terms'
 
 export default function RegisterScreen() {
   const { t } = useI18n()
@@ -56,62 +58,103 @@ export default function RegisterScreen() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [serverErrors, setServerErrors] = useState<Partial<Record<ServerErrorField, string>>>({})
 
   const emailRef = React.useRef<TextInput>(null)
   const passwordRef = React.useRef<TextInput>(null)
   const confirmRef = React.useRef<TextInput>(null)
 
-  const nameError = submitted && !name.trim() ? t('register.errors.nameRequired') : null
+  const nameError =
+    serverErrors.name ?? (submitted && !name.trim() ? t('register.errors.nameRequired') : null)
 
   const emailKey = submitted ? validateEmail(email, { required: true }) : null
-  const emailError = emailKey
-    ? emailKey === 'emailRequired'
-      ? t('login.errors.emailRequired')
-      : t('login.errors.emailInvalid')
-    : null
+  const emailError =
+    serverErrors.email ??
+    (emailKey
+      ? emailKey === 'emailRequired'
+        ? t('login.errors.emailRequired')
+        : t('login.errors.emailInvalid')
+      : null)
 
   const passwordKey = submitted ? validatePassword(password, { required: true }) : null
-  const passwordError = passwordKey
-    ? passwordKey === 'passwordRequired'
-      ? t('login.errors.passwordRequired')
-      : t(`register.errors.${passwordKey}`)
-    : null
+  const passwordError =
+    serverErrors.password ??
+    (passwordKey
+      ? passwordKey === 'passwordRequired'
+        ? t('login.errors.passwordRequired')
+        : t(`register.errors.${passwordKey}`)
+      : null)
 
   // Live mismatch check: as soon as the user has typed both passwords, show
   // a hint without waiting for submit. Pre-submit, missing-field errors are
   // still gated on `submitted` so the user isn't yelled at on first paint.
-  const confirmError = submitted
-    ? !confirm
-      ? t('register.errors.passwordConfirmRequired')
-      : password !== confirm
+  const confirmError =
+    serverErrors.password_confirmation ??
+    (submitted
+      ? !confirm
+        ? t('register.errors.passwordConfirmRequired')
+        : password !== confirm
+          ? t('register.errors.passwordMismatch')
+          : null
+      : password && confirm && password !== confirm
         ? t('register.errors.passwordMismatch')
-        : null
-    : password && confirm && password !== confirm
-      ? t('register.errors.passwordMismatch')
-      : null
+        : null)
 
-  const termsError = submitted && !acceptedTerms ? t('register.termsError') : null
+  const termsError =
+    serverErrors.terms ?? (submitted && !acceptedTerms ? t('register.termsError') : null)
 
   const mutation = useMutation({
-    // The Laravel register endpoint does not issue mobile tokens on its
-    // own — it just creates the account. Chain a login call so the user
-    // lands in the app with a valid session instead of bouncing back to
-    // the login screen.
+    // New backends return mobile tokens atomically with registration. The
+    // login fallback keeps rollout compatible with an older deployed API.
     mutationFn: async () => {
-      await registerApi({
+      const registration = await registerApi({
         name: name.trim(),
         email: email.trim(),
         password,
         password_confirmation: confirm,
       })
-      return loginApi(email.trim(), password)
+      if (registration.tokens) {
+        return {
+          kind: 'authenticated' as const,
+          session: { user: registration.user, tokens: registration.tokens },
+        }
+      }
+      try {
+        const session = await loginApi(email.trim(), password)
+        return { kind: 'authenticated' as const, session }
+      } catch {
+        // Account creation is already committed. A network/CSRF/login failure
+        // here must not be reported as a failed registration, otherwise the
+        // user's retry collides with the email that was just created.
+        return { kind: 'account-created' as const }
+      }
     },
-    onSuccess: ({ user, tokens }) => {
+    onSuccess: (result) => {
       toast.success(t('register.success'))
-      setTimeout(() => setSession(user, tokens), 500)
+      if (result.kind === 'account-created') {
+        navigation.replace('Login', { initialEmail: email.trim() })
+        return
+      }
+      setSession(result.session.user, result.session.tokens)
     },
-    onError: () => {
-      toast.error(t('register.errors.registerFailed'))
+    onError: (error) => {
+      if (isApiError(error) && error.kind === 'validation' && error.fieldErrors) {
+        setServerErrors({
+          name: error.fieldErrors.name ? t('register.errors.nameRequired') : undefined,
+          email: error.fieldErrors.email ? t('register.errors.emailUnavailable') : undefined,
+          password: error.fieldErrors.password ? t('register.errors.passwordRejected') : undefined,
+          password_confirmation: error.fieldErrors.password_confirmation
+            ? t('register.errors.passwordMismatch')
+            : undefined,
+          terms:
+            error.fieldErrors.terms_accepted || error.fieldErrors.privacy_accepted
+              ? t('register.termsError')
+              : undefined,
+        })
+        toast.error(t('register.errors.fixFields'))
+        return
+      }
+      toast.error(getAuthErrorMessage(error, t, 'register.errors.registerFailed'))
     },
   })
 
@@ -129,6 +172,7 @@ export default function RegisterScreen() {
       return
     }
 
+    setServerErrors({})
     mutation.mutate()
   }
 
@@ -157,6 +201,8 @@ export default function RegisterScreen() {
             }}
             hitSlop={12}
             style={styles.backBtn}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.back')}
           >
             <Icon name="chevron-back" size={26} color={c.brand as string} />
             <Text style={styles.backText}>{t('common.back')}</Text>
@@ -193,7 +239,10 @@ export default function RegisterScreen() {
                     iconName="person-outline"
                     placeholder={t('register.namePlaceholder')}
                     value={name}
-                    onChangeText={setName}
+                    onChangeText={(value) => {
+                      setName(value)
+                      setServerErrors((current) => ({ ...current, name: undefined }))
+                    }}
                     autoCapitalize="words"
                     autoComplete="name"
                     textContentType="name"
@@ -201,8 +250,14 @@ export default function RegisterScreen() {
                     onSubmitEditing={() => emailRef.current?.focus()}
                     maxLength={INPUT_LIMITS.personName}
                     error={Boolean(nameError)}
+                    errorMessage={nameError}
+                    accessibilityLabel={t('register.name')}
                   />
-                  {nameError ? <Text style={styles.fieldError}>{nameError}</Text> : null}
+                  {nameError ? (
+                    <Text style={styles.fieldError} accessibilityRole="alert" aria-live="polite">
+                      {nameError}
+                    </Text>
+                  ) : null}
                 </View>
 
                 <View>
@@ -211,7 +266,10 @@ export default function RegisterScreen() {
                     iconName="mail-outline"
                     placeholder={t('register.emailPlaceholder')}
                     value={email}
-                    onChangeText={setEmail}
+                    onChangeText={(value) => {
+                      setEmail(value)
+                      setServerErrors((current) => ({ ...current, email: undefined }))
+                    }}
                     keyboardType="email-address"
                     autoCapitalize="none"
                     autoComplete="email"
@@ -221,8 +279,14 @@ export default function RegisterScreen() {
                     onSubmitEditing={() => passwordRef.current?.focus()}
                     maxLength={INPUT_LIMITS.email}
                     error={Boolean(emailError)}
+                    errorMessage={emailError}
+                    accessibilityLabel={t('register.email')}
                   />
-                  {emailError ? <Text style={styles.fieldError}>{emailError}</Text> : null}
+                  {emailError ? (
+                    <Text style={styles.fieldError} accessibilityRole="alert" aria-live="polite">
+                      {emailError}
+                    </Text>
+                  ) : null}
                 </View>
 
                 <View>
@@ -231,7 +295,10 @@ export default function RegisterScreen() {
                     iconName="lock-closed-outline"
                     placeholder={t('register.passwordPlaceholder')}
                     value={password}
-                    onChangeText={setPassword}
+                    onChangeText={(value) => {
+                      setPassword(value)
+                      setServerErrors((current) => ({ ...current, password: undefined }))
+                    }}
                     secureTextEntry={!showPwd}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -241,8 +308,15 @@ export default function RegisterScreen() {
                     onSubmitEditing={() => confirmRef.current?.focus()}
                     maxLength={INPUT_LIMITS.password}
                     error={Boolean(passwordError)}
+                    errorMessage={passwordError}
+                    accessibilityLabel={t('register.password')}
                     rightAccessory={
-                      <Pressable onPress={() => setShowPwd((v) => !v)} hitSlop={12}>
+                      <Pressable
+                        onPress={() => setShowPwd((v) => !v)}
+                        hitSlop={12}
+                        accessibilityRole="button"
+                        accessibilityLabel={t(showPwd ? 'login.hide' : 'login.show')}
+                      >
                         <Icon
                           name={showPwd ? 'eye-off-outline' : 'eye-outline'}
                           size={20}
@@ -252,7 +326,9 @@ export default function RegisterScreen() {
                     }
                   />
                   {passwordError ? (
-                    <Text style={styles.fieldError}>{passwordError}</Text>
+                    <Text style={styles.fieldError} accessibilityRole="alert" aria-live="polite">
+                      {passwordError}
+                    </Text>
                   ) : null}
                 </View>
 
@@ -264,7 +340,13 @@ export default function RegisterScreen() {
                     iconName="shield-checkmark-outline"
                     placeholder={t('register.confirmPasswordPlaceholder')}
                     value={confirm}
-                    onChangeText={setConfirm}
+                    onChangeText={(value) => {
+                      setConfirm(value)
+                      setServerErrors((current) => ({
+                        ...current,
+                        password_confirmation: undefined,
+                      }))
+                    }}
                     secureTextEntry={!showConfirm}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -274,8 +356,15 @@ export default function RegisterScreen() {
                     onSubmitEditing={handleSubmit}
                     maxLength={INPUT_LIMITS.password}
                     error={Boolean(confirmError)}
+                    errorMessage={confirmError}
+                    accessibilityLabel={t('register.confirmPassword')}
                     rightAccessory={
-                      <Pressable onPress={() => setShowConfirm((v) => !v)} hitSlop={12}>
+                      <Pressable
+                        onPress={() => setShowConfirm((v) => !v)}
+                        hitSlop={12}
+                        accessibilityRole="button"
+                        accessibilityLabel={t(showConfirm ? 'login.hide' : 'login.show')}
+                      >
                         <Icon
                           name={showConfirm ? 'eye-off-outline' : 'eye-outline'}
                           size={20}
@@ -285,26 +374,49 @@ export default function RegisterScreen() {
                     }
                   />
                   {confirmError ? (
-                    <Text style={styles.fieldError}>{confirmError}</Text>
+                    <Text style={styles.fieldError} accessibilityRole="alert" aria-live="polite">
+                      {confirmError}
+                    </Text>
                   ) : null}
                 </View>
 
                 <View style={styles.termsRow}>
-                  <Checkbox checked={acceptedTerms} onChange={setAcceptedTerms} />
+                  <Checkbox
+                    checked={acceptedTerms}
+                    accessibilityLabel={`${t('register.termsPrefix')}${t('register.termsLink')}${t('register.termsAnd')}${t('register.privacyLink')}${t('register.termsSuffix')}`}
+                    onChange={(value) => {
+                      setAcceptedTerms(value)
+                      setServerErrors((current) => ({ ...current, terms: undefined }))
+                    }}
+                  />
                   <Text style={styles.termsText}>
                     {t('register.termsPrefix')}
-                    <Text style={styles.termsLink} onPress={() => openLink('terms')}>
+                    <Text
+                      style={styles.termsLink}
+                      onPress={() => openLink('terms')}
+                      accessibilityRole="link"
+                    >
                       {t('register.termsLink')}
                     </Text>
                     {t('register.termsAnd')}
-                    <Text style={styles.termsLink} onPress={() => openLink('privacy')}>
+                    <Text
+                      style={styles.termsLink}
+                      onPress={() => openLink('privacy')}
+                      accessibilityRole="link"
+                    >
                       {t('register.privacyLink')}
                     </Text>
                     {t('register.termsSuffix')}
                   </Text>
                 </View>
                 {termsError ? (
-                  <Text style={[styles.fieldError, styles.termsError]}>{termsError}</Text>
+                  <Text
+                    style={[styles.fieldError, styles.termsError]}
+                    accessibilityRole="alert"
+                    aria-live="polite"
+                  >
+                    {termsError}
+                  </Text>
                 ) : null}
 
                 <Button
@@ -323,25 +435,15 @@ export default function RegisterScreen() {
                   }
                 />
 
-                <View style={styles.divider}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>{t('register.orContinueWith')}</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-
-                <Button
-                  title={t('register.googleSignUp')}
-                  variant="secondary"
-                  fullWidth
-                  size="lg"
-                  leftIcon={<GoogleMark size={20} />}
-                  onPress={() => toast.info(t('settings.comingSoon'))}
-                />
               </View>
 
               <View style={styles.footer}>
                 <Text style={styles.footerText}>{t('register.haveAccount')} </Text>
-                <Pressable onPress={() => navigation.navigate('Login')} hitSlop={8}>
+                <Pressable
+                  onPress={() => navigation.navigate('Login')}
+                  hitSlop={8}
+                  accessibilityRole="link"
+                >
                   <Text style={styles.link}>{t('register.signIn')}</Text>
                 </Pressable>
               </View>
@@ -439,24 +541,6 @@ function makeStyles(c: Colors) {
     termsLink: {
       fontFamily: font('600'),
       color: c.brand,
-      fontWeight: '600',
-    },
-    divider: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.md,
-      marginVertical: spacing.xl,
-    },
-    dividerLine: {
-      flex: 1,
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: c.separator as string,
-    },
-    dividerText: {
-      ...typography.caption1,
-      fontFamily: font('600'),
-      color: c.labelSecondary,
-      letterSpacing: 1.5,
       fontWeight: '600',
     },
     footer: {

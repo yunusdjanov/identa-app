@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   RefreshControl,
   Pressable,
   StatusBar,
+  AppState,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -18,7 +19,6 @@ import * as Haptics from 'expo-haptics'
 import DashboardHeader from '../../components/dashboard/DashboardHeader'
 import EmailVerificationBanner from '../../components/dashboard/EmailVerificationBanner'
 import TodayHeroCard from '../../components/dashboard/TodayHeroCard'
-import FinanceCard from '../../components/dashboard/FinanceCard'
 import AppointmentRow from '../../components/dashboard/AppointmentRow'
 import EmptyState from '../../components/ui/EmptyState'
 import Button from '../../components/ui/Button'
@@ -26,7 +26,6 @@ import Icon from '../../components/ui/Icon'
 import SwipeableRow, { type SwipeAction } from '../../components/ui/SwipeableRow'
 import {
   HeroCardSkeleton,
-  StatCardSkeleton,
   ListRowSkeleton,
   Skeleton,
 } from '../../components/ui/Skeleton'
@@ -39,21 +38,19 @@ import { useThemeStore } from '../../stores/theme'
 import { useNetworkStore } from '../../stores/network'
 import { canView, canManage } from '../../lib/permissions'
 import { getDashboardSnapshot } from '../../api/dashboard'
-import { updateAppointment } from '../../api/appointments'
-import { cancelAppointmentReminder } from '../../lib/notifications'
+import { updateAppointmentStatus } from '../../api/appointments'
 import type { ApiAppointment, ApiListResponse } from '../../types'
-import { formatCurrencyParts, toLocalDateKey } from '../../lib/format'
+import { addDays, toLocalDateKey } from '../../lib/format'
 import { radius, spacing, typography, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
+import { useManualRefresh } from '../../lib/useManualRefresh'
 import type { DashboardAppointmentView } from '../../types'
 import type { MainTabParams } from '../../navigation'
 
-const AFTER_HOURS_THRESHOLD = 17 * 60 // 17:00 — pivot empty-state copy to "tomorrow" after this
-
 const MAX_UPCOMING = 4
-
+const MAX_OVERDUE = 3
 export default function DashboardScreen() {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const effective = useThemeStore((s) => s.effective)
@@ -61,37 +58,51 @@ export default function DashboardScreen() {
   const toast = useToast()
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParams>>()
   const openCreateAppointment = useUIStore((s) => s.openCreateAppointment)
+  const requestAppointmentsViewDate = useUIStore((s) => s.requestAppointmentsViewDate)
+  const requestAppointmentsViewAppointment = useUIStore(
+    (s) => s.requestAppointmentsViewAppointment
+  )
   const queryClient = useQueryClient()
+  const [now, setNow] = useState(() => new Date())
 
   const canViewAppointments = canView(user, 'appointments')
-  const canViewPayments = canView(user, 'payments')
   const canCreateAppointment = canManage(user, 'appointments')
+  const hasDashboardAccess = canViewAppointments
   const isOnline = useNetworkStore((s) => s.isOnline)
 
-  const isAfterHours = useMemo(() => {
-    const now = new Date()
-    return now.getHours() * 60 + now.getMinutes() >= AFTER_HOURS_THRESHOLD
+  useEffect(() => {
+    const tick = () => setNow(new Date())
+    const timer = setInterval(tick, 30_000)
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') tick()
+    })
+    return () => {
+      clearInterval(timer)
+      subscription.remove()
+    }
   }, [])
 
-  const todayKey = useMemo(() => toLocalDateKey(new Date()), [])
+  const todayKey = toLocalDateKey(now)
   const query = useQuery({
     queryKey: ['dashboard', 'snapshot', todayKey],
     queryFn: () => getDashboardSnapshot(todayKey),
+    enabled: hasDashboardAccess,
     staleTime: 30_000,
+  })
+  const {
+    isRefreshing,
+    onRefresh,
+  } = useManualRefresh(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    return query.refetch()
   })
 
   const data = query.data
   const isLoading = query.isLoading && !data
-  const isRefreshing = query.isFetching && Boolean(data)
 
-  // All of today's still-open (scheduled) appointments, sorted by start time.
-  // We DON'T filter out past start times here — a scheduled appointment whose
-  // time has passed without being marked completed/cancelled is exactly what
-  // the dentist needs to see and action (run the swipe → mark completed flow).
-  // Previously this list filtered `mins >= nowMinutes`, which made every
-  // morning appointment vanish by lunch and surfaced a misleading
-  // "all completed" empty state even when nothing had actually been completed.
-  const upcoming = useMemo(() => {
+  // Keep every scheduled appointment, then split finished time slots into a
+  // visible overdue section instead of hiding them or calling them "upcoming".
+  const scheduledToday = useMemo(() => {
     if (!data) return [] as DashboardAppointmentView[]
     return data.today_appointments
       .filter((a) => a.status === 'scheduled')
@@ -100,56 +111,60 @@ export default function DashboardScreen() {
       .map(({ a }) => a)
   }, [data])
 
-  const todayCount = upcoming.length
+  const nowMinutes = now.getHours() * 60 + now.getMinutes()
+  const overdueAppointments = useMemo(
+    () =>
+      scheduledToday.filter(
+        (appointment) =>
+          toMinutes(appointment.start_time) + appointment.duration_minutes <= nowMinutes
+      ),
+    [nowMinutes, scheduledToday]
+  )
+  const upcoming = useMemo(
+    () =>
+      scheduledToday.filter(
+        (appointment) =>
+          toMinutes(appointment.start_time) + appointment.duration_minutes > nowMinutes
+      ),
+    [nowMinutes, scheduledToday]
+  )
+  const scheduledCount = scheduledToday.length
+  const totalTodayCount = data?.today_appointments.length ?? 0
+  const allTodayCompleted = Boolean(
+    totalTodayCount > 0 && data?.today_appointments.every((a) => a.status === 'completed')
+  )
   const visibleUpcoming = upcoming.slice(0, MAX_UPCOMING)
-  const hiddenCount = Math.max(0, todayCount - visibleUpcoming.length)
-  // Hero card's "next" badge wants the first FUTURE appointment specifically —
-  // labeling a past-due slot as "next" would be misleading. Falls back to the
-  // earliest scheduled slot when nothing is left in the future today (so the
-  // hero still has something to point at on a busy-but-overdue afternoon).
+  const visibleOverdue = overdueAppointments.slice(0, MAX_OVERDUE)
+  const hiddenUpcomingCount = Math.max(0, upcoming.length - visibleUpcoming.length)
+  const hiddenOverdueCount = Math.max(0, overdueAppointments.length - visibleOverdue.length)
+  // Hero card's "next" badge wants the first future appointment specifically;
+  // labeling a past-due slot as "next" would be misleading.
   const nextAppointment = useMemo(() => {
     if (upcoming.length === 0) return null
-    const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes()
-    return upcoming.find((a) => toMinutes(a.start_time) >= nowMinutes) ?? upcoming[0]
+    return upcoming[0]
   }, [upcoming])
 
-  const revenueParts = data ? formatCurrencyParts(data.revenue_this_month, locale) : null
-  const debtParts = data ? formatCurrencyParts(data.outstanding_debt_total, locale) : null
-
-  // Synthetic 7-day trend for the sparkline. The mock backend doesn't return
-  // history yet — we derive a smooth wobble around the current total so the
-  // chart reads as "this is what the last week looked like". Real backend
-  // will replace this with snapshot history.
-  const revenueTrend = useMemo(
-    () => buildTrend(data?.revenue_this_month ?? 0, 7, 'up'),
-    [data?.revenue_this_month]
-  )
-  const debtTrend = useMemo(
-    () => buildTrend(data?.outstanding_debt_total ?? 0, 7, 'down'),
-    [data?.outstanding_debt_total]
-  )
-
-  // Formatter that mirrors formatCurrencyParts.value for the animated counter.
-  const formatRevenue = React.useCallback(
-    (n: number) => formatCurrencyParts(Math.round(n), locale).value,
-    [locale]
-  )
-
-  const onRefresh = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-    query.refetch()
-  }
+  const isAfterHours =
+    now.getHours() * 60 + now.getMinutes() >= toMinutes(data?.working_hours_end ?? '17:00')
 
   const onViewAllAppointments = () => {
     if (!canViewAppointments) return
     Haptics.selectionAsync()
-    navigation.navigate('Appointments')
+    navigation.navigate('Dashboard')
   }
 
-  const onViewPayments = () => {
-    if (!canViewPayments) return
+  const onViewTomorrow = () => {
+    if (!canViewAppointments) return
     Haptics.selectionAsync()
-    navigation.navigate('Payments')
+    requestAppointmentsViewDate(toLocalDateKey(addDays(now, 1)))
+    navigation.navigate('Dashboard')
+  }
+
+  const onOpenAppointment = (appointment: DashboardAppointmentView) => {
+    if (!canViewAppointments) return
+    Haptics.selectionAsync()
+    requestAppointmentsViewAppointment(appointment.appointment_date, appointment.id)
+    navigation.navigate('Dashboard')
   }
 
   const onNewAppointment = () => {
@@ -183,12 +198,9 @@ export default function DashboardScreen() {
         return { ...old, data: old.data.map((a) => (a.id === id ? { ...a, status } : a)) }
       }
     )
-    // Cancel any pending reminder since the appointment is no longer scheduled.
-    if (status !== 'scheduled') {
-      cancelAppointmentReminder(id).catch(() => {})
-    }
     // 3. Persist to server. On failure, invalidate so the cache resnaps to truth.
-    updateAppointment(id, { status })
+    if (status === 'scheduled') return
+    updateAppointmentStatus(id, status)
       .then(() => {
         const verb =
           status === 'completed' ? Haptics.NotificationFeedbackType.Success :
@@ -233,7 +245,15 @@ export default function DashboardScreen() {
 
           <EmailVerificationBanner />
 
-          {isLoading ? (
+          {!hasDashboardAccess ? (
+            <View style={styles.bodyPad}>
+              <EmptyState
+                iconName="lock-closed-outline"
+                title={t('dashboard.noAccess')}
+                tone="warning"
+              />
+            </View>
+          ) : isLoading ? (
             <LoadingState />
           ) : query.isError && !data ? (
             <View style={styles.bodyPad}>
@@ -257,52 +277,60 @@ export default function DashboardScreen() {
               {/* Hero card — Today's appointments + next */}
               {canViewAppointments ? (
                 <TodayHeroCard
-                  count={todayCount}
+                  totalCount={totalTodayCount}
+                  remainingCount={scheduledCount}
                   next={nextAppointment}
                   onPressViewAll={onViewAllAppointments}
-                  onPressNext={onViewAllAppointments}
+                  onPressNext={
+                    nextAppointment ? () => onOpenAppointment(nextAppointment) : undefined
+                  }
                 />
-              ) : (
-                <LockedCard t={t} />
-              )}
+              ) : null}
 
-              {/* Finance cards — Revenue + Debt */}
-              {canViewPayments && data && revenueParts && debtParts ? (
-                <View style={styles.financeRow}>
-                  <FinanceCard
-                    iconName="trending-up-outline"
-                    label={t('dashboard.thisMonthRevenue')}
-                    value={revenueParts.value}
-                    unit={revenueParts.unit}
-                    // Blue gradient — keeps the two finance cards visually
-                    // distinct from each other even when there's no debt
-                    // (otherwise both render in the same green success tone).
-                    tone="info"
-                    numericValue={data.revenue_this_month}
-                    formatValue={formatRevenue}
-                    trend={revenueTrend}
-                    onPress={onViewPayments}
+              {canViewAppointments && visibleOverdue.length > 0 ? (
+                <View>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionTitleRow}>
+                      <View style={[styles.sectionIcon, styles.overdueSectionIcon]}>
+                        <Icon name="alert-outline" size={14} color={c.danger as string} />
+                      </View>
+                      <Text style={[styles.sectionTitle, { color: c.danger }]} numberOfLines={1}>
+                        {t('dashboard.needsAttention')}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={onViewAllAppointments}
+                      hitSlop={8}
+                      style={styles.sectionActionBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('dashboard.viewAll')}
+                    >
+                      <Text style={styles.sectionAction}>{t('dashboard.viewAll')}</Text>
+                      <Icon name="chevron-forward" size={14} color={c.brand as string} />
+                    </Pressable>
+                  </View>
+                  {canCreateAppointment ? (
+                    <Text style={styles.swipeHint}>{t('dashboard.swipeHint')}</Text>
+                  ) : null}
+                  <DashboardAppointmentList
+                    appointments={visibleOverdue}
+                    overdue
+                    canManage={canCreateAppointment}
+                    onOpen={onOpenAppointment}
+                    onStatusChange={updateApptStatus}
                   />
-                  <FinanceCard
-                    iconName="warning-outline"
-                    label={t('dashboard.outstandingDebt')}
-                    value={debtParts.value}
-                    unit={debtParts.unit}
-                    // Outstanding debt always uses the red (danger) tone — even
-                    // at 0 — to match the web dashboard's product rule (debt is
-                    // a "money owed" category, kept visually consistent).
-                    tone="danger"
-                    numericValue={data.outstanding_debt_total}
-                    formatValue={formatRevenue}
-                    trend={debtTrend}
-                    onPress={onViewPayments}
-                  />
+                  {hiddenOverdueCount > 0 ? (
+                    <ShowAllButton
+                      count={overdueAppointments.length}
+                      onPress={onViewAllAppointments}
+                    />
+                  ) : null}
                 </View>
-              ) : !canViewPayments ? (
-                <LockedCard t={t} />
               ) : null}
 
               {/* Upcoming appointments section */}
+              {canViewAppointments &&
+              (visibleUpcoming.length > 0 || overdueAppointments.length === 0) ? (
               <View>
                 <View style={styles.sectionHeader}>
                   <View style={styles.sectionTitleRow}>
@@ -314,30 +342,48 @@ export default function DashboardScreen() {
                     </Text>
                   </View>
                   {visibleUpcoming.length > 0 ? (
-                    <Pressable onPress={onViewAllAppointments} hitSlop={8} style={styles.sectionActionBtn}>
+                    <Pressable
+                      onPress={onViewAllAppointments}
+                      hitSlop={8}
+                      style={styles.sectionActionBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('dashboard.viewAll')}
+                    >
                       <Text style={styles.sectionAction} numberOfLines={1}>{t('dashboard.viewAll')}</Text>
                       <Icon name="chevron-forward" size={14} color={c.brand as string} />
                     </Pressable>
                   ) : null}
                 </View>
 
-                {canViewAppointments ? (
-                  visibleUpcoming.length === 0 ? (
-                    todayCount === 0 ? (
+                {visibleUpcoming.length === 0 ? (
+                    allTodayCompleted ? (
+                      <EmptyState
+                        iconName="checkmark-circle-outline"
+                        title={t('dashboard.allCompleted')}
+                        tone="success"
+                        action={
+                          <Button
+                            title={`${t('dashboard.viewAll')} (${totalTodayCount})`}
+                            variant="tinted"
+                            onPress={onViewAllAppointments}
+                          />
+                        }
+                      />
+                    ) : (
                       <EmptyState
                         iconName={isAfterHours ? 'moon-outline' : 'calendar-outline'}
                         title={
-                          isAfterHours
+                          isAfterHours || totalTodayCount > 0
                             ? t('dashboard.todayDone')
                             : t('dashboard.todayAppointmentsEmpty')
                         }
-                        tone={isAfterHours ? 'success' : 'neutral'}
+                        tone={isAfterHours || totalTodayCount > 0 ? 'success' : 'neutral'}
                         action={
-                          isAfterHours ? (
+                          isAfterHours || totalTodayCount > 0 ? (
                             <Button
                               title={t('dashboard.viewTomorrow')}
                               variant="tinted"
-                              onPress={onViewAllAppointments}
+                              onPress={onViewTomorrow}
                             />
                           ) : canCreateAppointment ? (
                             <Button
@@ -348,84 +394,112 @@ export default function DashboardScreen() {
                           ) : undefined
                         }
                       />
-                    ) : (
-                      <EmptyState
-                        iconName="checkmark-circle-outline"
-                        title={t('dashboard.allCompleted')}
-                        tone="success"
-                        action={
-                          <Button
-                            title={`${t('dashboard.viewAll')} (${todayCount})`}
-                            variant="tinted"
-                            onPress={onViewAllAppointments}
-                          />
-                        }
-                      />
                     )
                   ) : (
-                    <View style={styles.list}>
-                      {visibleUpcoming.map((a, idx) => {
-                        const swipeActions: SwipeAction[] = canCreateAppointment
-                          ? [
-                              {
-                                key: 'complete',
-                                label: t('appointments.detail.markCompleted'),
-                                iconName: 'checkmark-circle',
-                                bg: '#16A34A',
-                                onPress: () => updateApptStatus(a.id, 'completed'),
-                              },
-                              {
-                                key: 'cancel',
-                                label: t('appointments.detail.markCancelled'),
-                                iconName: 'close-circle',
-                                bg: '#DC2626',
-                                onPress: () => updateApptStatus(a.id, 'cancelled'),
-                              },
-                            ]
-                          : []
-                        return (
-                          <React.Fragment key={a.id}>
-                            <SwipeableRow
-                              rightActions={swipeActions.length > 0 ? swipeActions : undefined}
-                            >
-                              <AppointmentRow
-                                appointment={a}
-                                highlightUpcoming={idx === 0}
-                                onPress={onViewAllAppointments}
-                              />
-                            </SwipeableRow>
-                            {idx < visibleUpcoming.length - 1 ? (
-                              <View style={styles.separator} />
-                            ) : null}
-                          </React.Fragment>
-                        )
-                      })}
-
-                      {hiddenCount > 0 ? (
-                        <Pressable
-                          onPress={onViewAllAppointments}
-                          style={({ pressed }) => [
-                            styles.showAll,
-                            pressed && { backgroundColor: c.fillQuaternary },
-                          ]}
-                        >
-                          <Text style={styles.showAllText}>
-                            {t('dashboard.viewAll')} ({todayCount})
-                          </Text>
-                          <Icon name="chevron-forward" size={18} color={c.brand as string} />
-                        </Pressable>
+                    <>
+                      {canCreateAppointment && overdueAppointments.length === 0 ? (
+                        <Text style={styles.swipeHint}>{t('dashboard.swipeHint')}</Text>
                       ) : null}
-                    </View>
-                  )
-                ) : (
-                  <LockedCard t={t} />
-                )}
+                      <DashboardAppointmentList
+                        appointments={visibleUpcoming}
+                        canManage={canCreateAppointment}
+                        onOpen={onOpenAppointment}
+                        onStatusChange={updateApptStatus}
+                      />
+                      {hiddenUpcomingCount > 0 ? (
+                        <ShowAllButton count={upcoming.length} onPress={onViewAllAppointments} />
+                      ) : null}
+                    </>
+                  )}
               </View>
+              ) : null}
             </View>
           )}
         </ScrollView>
       </SafeAreaView>
     </View>
+  )
+}
+
+interface DashboardAppointmentListProps {
+  appointments: DashboardAppointmentView[]
+  overdue?: boolean
+  canManage: boolean
+  onOpen: (appointment: DashboardAppointmentView) => void
+  onStatusChange: (id: string, status: ApiAppointment['status']) => void
+}
+
+function DashboardAppointmentList({
+  appointments,
+  overdue = false,
+  canManage,
+  onOpen,
+  onStatusChange,
+}: DashboardAppointmentListProps) {
+  const { t } = useI18n()
+  const c = useColors()
+  const styles = useMemo(() => makeStyles(c), [c])
+
+  return (
+    <View style={styles.list}>
+      {appointments.map((appointment, index) => {
+        const swipeActions: SwipeAction[] = canManage
+          ? [
+              {
+                key: 'complete',
+                label: t('appointments.detail.markCompleted'),
+                iconName: 'checkmark-circle',
+                bg: '#16A34A',
+                onPress: () => onStatusChange(appointment.id, 'completed'),
+              },
+              {
+                key: 'cancel',
+                label: t('appointments.detail.markCancelled'),
+                iconName: 'close-circle',
+                bg: '#DC2626',
+                onPress: () => onStatusChange(appointment.id, 'cancelled'),
+              },
+            ]
+          : []
+
+        return (
+          <React.Fragment key={appointment.id}>
+            <SwipeableRow rightActions={swipeActions.length > 0 ? swipeActions : undefined}>
+              <AppointmentRow
+                appointment={appointment}
+                highlightUpcoming={!overdue && index === 0}
+                overdue={overdue}
+                onPress={() => onOpen(appointment)}
+              />
+            </SwipeableRow>
+            {index < appointments.length - 1 ? <View style={styles.separator} /> : null}
+          </React.Fragment>
+        )
+      })}
+    </View>
+  )
+}
+
+function ShowAllButton({ count, onPress }: { count: number; onPress: () => void }) {
+  const { t } = useI18n()
+  const c = useColors()
+  const styles = useMemo(() => makeStyles(c), [c])
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.showAll,
+        pressed && { backgroundColor: c.fillQuaternary },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={`${t('dashboard.viewAll')} (${count})`}
+    >
+      <Text style={styles.showAllText}>
+        {t('dashboard.viewAll')} ({count})
+      </Text>
+      <Icon name="chevron-forward" size={18} color={c.brand as string} />
+    </Pressable>
   )
 }
 
@@ -435,10 +509,6 @@ function LoadingState() {
   return (
     <View style={styles.body}>
       <HeroCardSkeleton />
-      <View style={styles.financeRow}>
-        <StatCardSkeleton />
-        <StatCardSkeleton />
-      </View>
       <View>
         <View style={styles.sectionHeader}>
           <Skeleton width={140} height={18} />
@@ -456,45 +526,9 @@ function LoadingState() {
   )
 }
 
-function LockedCard({ t }: { t: (k: string) => string }) {
-  const c = useColors()
-  const styles = useMemo(() => makeStyles(c), [c])
-  return (
-    <View style={styles.lockedCard}>
-      <Icon name="lock-closed-outline" size={22} color={c.labelSecondary as string} />
-      <Text style={styles.lockedText}>{t('dashboard.noAccess')}</Text>
-    </View>
-  )
-}
-
 function toMinutes(time: string): number {
   const [h, m] = time.split(':').map((n) => parseInt(n, 10) || 0)
   return h * 60 + m
-}
-
-// Deterministic synthetic 7-day trend. Builds a series of values that ends
-// at `current` and trends generally upward / downward depending on
-// `direction`. Seeded by the current value so the chart is stable across
-// re-renders but changes meaningfully when the underlying number does.
-function buildTrend(current: number, points: number, direction: 'up' | 'down'): number[] {
-  if (current <= 0) return Array.from({ length: points }, () => 0)
-  let seed = Math.floor(current) || 1
-  const rand = () => {
-    seed = (seed * 9301 + 49297) % 233280
-    return seed / 233280
-  }
-  const base = direction === 'up' ? current * 0.65 : current * 1.35
-  const arr: number[] = []
-  for (let i = 0; i < points - 1; i++) {
-    const progress = i / (points - 1)
-    const eased = direction === 'up' ? progress : 1 - progress
-    // Smooth interpolation from base toward current, plus +/-10% jitter.
-    const target = base + (current - base) * eased
-    const jitter = (rand() - 0.5) * current * 0.18
-    arr.push(Math.max(0, target + jitter))
-  }
-  arr.push(current)
-  return arr
 }
 
 function makeStyles(c: Colors) {
@@ -507,10 +541,6 @@ function makeStyles(c: Colors) {
       gap: spacing.lg,
     },
     bodyPad: { paddingHorizontal: spacing.xl },
-    financeRow: {
-      flexDirection: 'row',
-      gap: spacing.md,
-    },
     sectionHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -533,6 +563,16 @@ function makeStyles(c: Colors) {
       backgroundColor: c.brandLight,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    overdueSectionIcon: {
+      backgroundColor: 'rgba(255,59,48,0.10)',
+    },
+    swipeHint: {
+      ...typography.caption1,
+      color: c.labelTertiary,
+      marginTop: -spacing.sm,
+      marginBottom: spacing.sm,
+      paddingHorizontal: spacing.xs,
     },
     sectionTitle: {
       // `flex: 1` + `flexShrink: 1` are critical: the Uzbek translation
@@ -584,18 +624,6 @@ function makeStyles(c: Colors) {
     showAllText: {
       ...typography.footnoteBold,
       color: c.brandDeep,
-    },
-    lockedCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      padding: spacing.lg,
-      backgroundColor: c.fillQuaternary,
-      borderRadius: radius.xl,
-    },
-    lockedText: {
-      ...typography.subhead,
-      color: c.labelSecondary,
     },
   })
 }

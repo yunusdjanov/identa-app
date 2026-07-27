@@ -7,7 +7,13 @@
  */
 import MockAdapter from 'axios-mock-adapter'
 import client from '../client'
-import { updateAppointment, listAppointments } from '../appointments'
+import {
+  createAppointment,
+  createPatientCardFromGuest,
+  updateAppointment,
+  updateAppointmentStatus,
+  listAppointments,
+} from '../appointments'
 import { useAuthStore } from '../../stores/auth'
 import { useNetworkStore } from '../../stores/network'
 import type { ApiAppointment } from '../../types'
@@ -77,5 +83,111 @@ describe('appointment write path', () => {
     expect(Number(params.per_page)).toBeGreaterThanOrEqual(100)
     expect(params['filter[date_from]']).toBe('2026-05-24')
     expect(params['filter[date_to]']).toBe('2026-05-24')
+  })
+
+  it('merges every backend page for calendar range queries', async () => {
+    mock.onGet('/appointments').reply((config) => {
+      const page = Number(config.params?.page ?? 1)
+      return [
+        200,
+        {
+          data: [{ ...sample, id: `apt-${page}` }],
+          meta: {
+            pagination: {
+              page,
+              total_pages: 2,
+              per_page: 1,
+              total: 2,
+            },
+          },
+        },
+      ]
+    })
+
+    const result = await listAppointments({
+      start_date: '2026-05-24',
+      end_date: '2026-05-30',
+    })
+
+    expect(result.data.map((appointment) => appointment.id)).toEqual(['apt-1', 'apt-2'])
+    expect(result.meta.pagination.total_pages).toBe(1)
+  })
+
+  it('updates status through the partial status endpoint', async () => {
+    let body: any
+    mock.onPatch('/appointments/apt-1/status').reply((config) => {
+      body = JSON.parse(config.data)
+      return [200, { data: { ...sample, status: 'completed' } }]
+    })
+
+    const updated = await updateAppointmentStatus('apt-1', 'completed')
+
+    expect(body).toEqual({ status: 'completed' })
+    expect(updated.status).toBe('completed')
+  })
+
+  it('creates a guest appointment with the backend guest fields', async () => {
+    let body: any
+    const guest = {
+      ...sample,
+      patient_id: null,
+      patient_name: 'Ali Valiyev',
+      guest_name: 'Ali Valiyev',
+      guest_phone: '+998901234567',
+      is_guest: true,
+    }
+    mock.onPost('/appointments').reply((config) => {
+      body = JSON.parse(config.data)
+      return [201, { data: guest }]
+    })
+
+    await createAppointment({
+      patient_id: null,
+      guest_name: 'Ali Valiyev',
+      guest_phone: '+998901234567',
+      appointment_date: sample.appointment_date,
+      start_time: sample.start_time,
+      end_time: sample.end_time,
+      status: 'scheduled',
+      notes: 'Consultation',
+    })
+
+    expect(body).toMatchObject({
+      patient_id: null,
+      guest_name: 'Ali Valiyev',
+      guest_phone: '+998901234567',
+      reason: 'Consultation',
+    })
+  })
+
+  it('creates a patient card from the guest identity', async () => {
+    let body: any
+    const appointment: ApiAppointment = {
+      ...sample,
+      patient_id: null,
+      patient_name: 'Ali Valiyev',
+      guest_name: 'Ali Valiyev',
+      guest_phone: '+998901234567',
+      is_guest: true,
+    }
+    mock.onPost('/appointments/apt-1/patient-card').reply((config) => {
+      body = JSON.parse(config.data)
+      return [201, {
+        data: {
+          appointment: { ...appointment, patient_id: 'p-2', is_guest: false },
+          patient: {
+            id: 'p-2',
+            patient_id: 'P-0002',
+            full_name: 'Ali Valiyev',
+            phone: '+998901234567',
+          },
+        },
+      }]
+    })
+
+    const result = await createPatientCardFromGuest(appointment)
+
+    expect(body).toEqual({ full_name: 'Ali Valiyev', phone: '+998901234567' })
+    expect(result.patient.id).toBe('p-2')
   })
 })

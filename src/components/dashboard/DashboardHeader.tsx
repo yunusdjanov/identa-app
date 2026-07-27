@@ -5,12 +5,10 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import * as Haptics from 'expo-haptics'
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
-import { useToast } from '../ui/Toast'
 import Icon from '../ui/Icon'
 import LanguageSwitcher from '../ui/LanguageSwitcher'
 import { radius, typography, spacing, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
-import { canViewAnalytics } from '../../lib/permissions'
 import { formatLongDate, getGreetingKey } from '../../lib/format'
 import type { MainStackParams } from '../../navigation'
 
@@ -21,7 +19,6 @@ export default function DashboardHeader() {
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const user = useAuthStore((s) => s.user)
-  const toast = useToast()
   const navigation = useNavigation<Nav>()
 
   const greetingKey = getGreetingKey()
@@ -61,6 +58,8 @@ export default function DashboardHeader() {
               navigation.navigate('Settings')
             }}
             style={({ pressed }) => [styles.avatar, pressed && { opacity: 0.7 }]}
+            accessibilityRole="button"
+            accessibilityLabel={t('settings.title')}
           >
             <Text style={styles.avatarText}>{initial}</Text>
           </Pressable>
@@ -77,33 +76,7 @@ export default function DashboardHeader() {
             </Text>
           </View>
         </View>
-
-        <View style={styles.right}>
-          {canViewAnalytics(user) ? (
-            <Pressable
-              onPress={() => {
-                Haptics.selectionAsync()
-                navigation.navigate('Analytics')
-              }}
-              style={styles.iconBtn}
-              hitSlop={6}
-              accessibilityLabel={t('analytics.title')}
-            >
-              <Icon name="stats-chart-outline" size={20} color={c.label as string} />
-            </Pressable>
-          ) : null}
-          <Pressable
-            onPress={() => {
-              Haptics.selectionAsync()
-              toast.info(t('settings.comingSoon'))
-            }}
-            style={styles.iconBtn}
-            hitSlop={6}
-          >
-            <Icon name="notifications-outline" size={22} color={c.label as string} />
-          </Pressable>
-          <LanguageSwitcher />
-        </View>
+        <LanguageSwitcher variant="minimal" />
       </View>
     </View>
   )
@@ -162,19 +135,6 @@ function makeStyles(c: Colors) {
       ...typography.footnote,
       color: c.labelSecondary,
       textTransform: 'capitalize',
-    },
-    right: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    iconBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: radius.pill,
-      backgroundColor: c.fillQuaternary,
-      alignItems: 'center',
-      justifyContent: 'center',
     },
   })
 }

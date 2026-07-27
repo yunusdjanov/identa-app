@@ -8,7 +8,7 @@ import {
   ViewStyle,
   StyleProp,
 } from 'react-native'
-import { radius, typography } from '../../constants/theme'
+import { font, inputMetrics, radius, typography } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 
 interface Props extends TextInputProps {
@@ -22,7 +22,20 @@ interface Props extends TextInputProps {
 }
 
 const Input = forwardRef<TextInput, Props>(function Input(
-  { label, required, error, hint, containerStyle, rightAccessory, leftAccessory, style, onFocus, onBlur, ...rest },
+  {
+    label,
+    required,
+    error,
+    hint,
+    containerStyle,
+    rightAccessory,
+    leftAccessory,
+    style,
+    onFocus,
+    onBlur,
+    accessibilityHint,
+    ...rest
+  },
   ref
 ) {
   const c = useColors()
@@ -60,12 +73,15 @@ const Input = forwardRef<TextInput, Props>(function Input(
             onBlur?.(e)
           }}
           {...rest}
+          accessibilityLabel={rest.accessibilityLabel ?? label ?? rest.placeholder}
+          accessibilityHint={error ?? accessibilityHint}
+          aria-invalid={hasError}
         />
         {rightAccessory ? <View style={styles.accessory}>{rightAccessory}</View> : null}
       </View>
 
       {hasError ? (
-        <Text style={styles.error}>{error}</Text>
+        <Text style={styles.error} accessibilityRole="alert">{error}</Text>
       ) : hint ? (
         <Text style={styles.hint}>{hint}</Text>
       ) : null}
@@ -87,14 +103,21 @@ function makeStyles(c: Colors) {
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: 'transparent',
-    paddingHorizontal: 14,
-    height: 50,
-    gap: 10,
+    paddingHorizontal: inputMetrics.paddingHorizontal,
+    height: inputMetrics.height,
+    gap: 8,
   },
   inputWrapFocused: { borderColor: c.brand, backgroundColor: c.background },
   inputWrapError: { borderColor: c.danger, backgroundColor: c.background },
   accessory: { justifyContent: 'center', alignItems: 'center' },
-  input: { flex: 1, ...typography.body, color: c.label, paddingVertical: 0 },
+  input: {
+    flex: 1,
+    fontFamily: font('400'),
+    fontSize: inputMetrics.fontSize,
+    lineHeight: inputMetrics.lineHeight,
+    color: c.label,
+    paddingVertical: 0,
+  },
   error: { ...typography.footnote, color: c.danger, marginLeft: 4 },
   hint: { ...typography.footnote, color: c.labelSecondary, marginLeft: 4 },
   })

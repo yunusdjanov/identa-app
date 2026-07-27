@@ -1,38 +1,52 @@
-import React, { useMemo, useState } from 'react'
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Dimensions } from 'react-native'
+import React, { useCallback, useMemo, useState } from 'react'
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  RefreshControl,
+  useWindowDimensions,
+} from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigation } from '@react-navigation/native'
+import { useFocusEffect, useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 
 import Icon from '../../components/ui/Icon'
+import Button from '../../components/ui/Button'
 import EmptyState from '../../components/ui/EmptyState'
-import Sparkline from '../../components/ui/Sparkline'
+import AppHeader, { HeaderIconButton } from '../../components/navigation/AppHeader'
+import AnalyticsKpiCard from '../../components/analytics/AnalyticsKpiCard'
+import AnalyticsRangeSelector from '../../components/analytics/AnalyticsRangeSelector'
+import AnalyticsCurrencySelector from '../../components/analytics/AnalyticsCurrencySelector'
+import AnalyticsTrendCard from '../../components/analytics/AnalyticsTrendCard'
+import { Skeleton } from '../../components/ui/Skeleton'
+import { useToast } from '../../components/ui/Toast'
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
-import { canView, canViewAnalytics } from '../../lib/permissions'
-import { listTreatments } from '../../api/treatments'
-import { listAppointments } from '../../api/appointments'
-import { listPatients } from '../../api/patients'
-import { getDashboardSnapshot } from '../../api/dashboard'
+import { canExportData, canView, canViewAnalytics } from '../../lib/permissions'
+import { getAnalyticsSummary } from '../../api/analytics'
 import {
-  ANALYTICS_RANGES,
   DEFAULT_ANALYTICS_RANGE,
-  computeAnalyticsKpis,
-  computeAppointmentStatusCounts,
-  computeTopDebtors,
-  computeRevenueSeries,
-  computePatientGrowthSeries,
+  computeDelta,
+  getPreviousRangeBounds,
+  getRangeBounds,
   type AnalyticsRange,
-  type KpiValue,
 } from '../../lib/analytics'
 import { formatCurrencyParts, toLocalDateKey } from '../../lib/format'
+import { formatStoredPhone } from '../../lib/phoneFormat'
 import type { Locale } from '../../constants'
-import { font, radius, spacing, typography } from '../../constants/theme'
+import { getFloatingTabBarContentInset } from '../../constants/navigation'
+import { exportAnalyticsPdf } from '../../lib/analyticsExport'
+import { font, radius, shadows, spacing, typography } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
+import { useManualRefresh } from '../../lib/useManualRefresh'
+import type { DashboardCurrency } from '../../types'
 import type { MainStackParams } from '../../navigation'
 
 const STATUS_ORDER = ['scheduled', 'completed', 'cancelled', 'no_show'] as const
+const ANALYTICS_CONTENT_MAX_WIDTH = 960
 const STATUS_COLOR: Record<(typeof STATUS_ORDER)[number], string> = {
   scheduled: '#3B82F6',
   completed: '#14B8A6',
@@ -40,255 +54,485 @@ const STATUS_COLOR: Record<(typeof STATUS_ORDER)[number], string> = {
   no_show: '#F43F5E',
 }
 
-// Sparkline width = screen minus content padding (md*2) and card padding (md*2).
-const CHART_WIDTH = Dimensions.get('window').width - 72
-
 export default function AnalyticsScreen() {
   const { t, locale } = useI18n()
   const c = useColors()
   const insets = useSafeAreaInsets()
+  const { width: screenWidth } = useWindowDimensions()
   const styles = useMemo(() => makeStyles(c), [c])
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParams>>()
+  const toast = useToast()
   const user = useAuthStore((s) => s.user)
 
-  const canPayments = canView(user, 'payments')
-  const canPatients = canView(user, 'patients')
-  const canAppointments = canView(user, 'appointments')
-  const canAny = canViewAnalytics(user)
+  const localCanPayments = canView(user, 'payments')
+  const localCanPatients = canView(user, 'patients')
+  const localCanAppointments = canView(user, 'appointments')
+  const localCanAny = canViewAnalytics(user)
 
   const [range, setRange] = useState<AnalyticsRange>(DEFAULT_ANALYTICS_RANGE)
-  const todayKey = useMemo(() => toLocalDateKey(new Date()), [])
-
-  const treatmentsQuery = useQuery({
-    queryKey: ['analytics', 'treatments'],
-    queryFn: () => listTreatments({ per_page: 500 }),
-    enabled: canAny && canPayments,
-    staleTime: 60_000,
-  })
-  const patientsQuery = useQuery({
-    queryKey: ['analytics', 'patients'],
-    queryFn: () => listPatients({ per_page: 500 }),
-    enabled: canAny && canPatients,
-    staleTime: 60_000,
-  })
-  const appointmentsQuery = useQuery({
-    queryKey: ['analytics', 'appointments'],
-    queryFn: () => listAppointments({ per_page: 500 }),
-    enabled: canAny && canAppointments,
-    staleTime: 60_000,
-  })
-  const snapshotQuery = useQuery({
-    queryKey: ['dashboard', 'snapshot', todayKey],
-    queryFn: () => getDashboardSnapshot(todayKey),
-    enabled: canAny && canPayments,
-    staleTime: 60_000,
-  })
-
-  const isLoading =
-    (canPayments && (treatmentsQuery.isLoading || snapshotQuery.isLoading)) ||
-    (canPatients && patientsQuery.isLoading) ||
-    (canAppointments && appointmentsQuery.isLoading)
-
-  const isError =
-    treatmentsQuery.isError ||
-    patientsQuery.isError ||
-    appointmentsQuery.isError ||
-    snapshotQuery.isError
-
-  const kpis = useMemo(
-    () =>
-      computeAnalyticsKpis({
-        range,
-        treatments: treatmentsQuery.data?.data ?? [],
-        patients: patientsQuery.data?.data ?? [],
-        appointments: appointmentsQuery.data?.data ?? [],
-        outstandingDebtTotal: snapshotQuery.data?.outstanding_debt_total ?? 0,
-      }),
-    [range, treatmentsQuery.data, patientsQuery.data, appointmentsQuery.data, snapshotQuery.data]
+  const [currency, setCurrency] = useState<DashboardCurrency>('UZS')
+  const [anchorNow, setAnchorNow] = useState(() => new Date())
+  const [exporting, setExporting] = useState(false)
+  const bounds = useMemo(
+    () => getRangeBounds(range, anchorNow),
+    [range, anchorNow]
+  )
+  const previousBounds = useMemo(
+    () => getPreviousRangeBounds(range, anchorNow),
+    [range, anchorNow]
+  )
+  const summaryParams = useMemo(
+    () => ({
+      range,
+      current_from: toLocalDateKey(bounds.start),
+      current_to: toLocalDateKey(bounds.end),
+      previous_from: toLocalDateKey(previousBounds.start),
+      previous_to: toLocalDateKey(previousBounds.end),
+      currency,
+    }),
+    [range, bounds, previousBounds, currency]
   )
 
-  const revenueParts = formatCurrencyParts(kpis.revenue.current, locale as Locale)
-  const debtParts = formatCurrencyParts(kpis.debt.current, locale as Locale)
+  const analyticsQuery = useQuery({
+    queryKey: ['analytics', 'summary', summaryParams],
+    queryFn: () => getAnalyticsSummary(summaryParams),
+    enabled: localCanAny,
+    placeholderData: (previousData) =>
+      previousData?.currency === currency ? previousData : undefined,
+    staleTime: 60_000,
+  })
+  const analytics = analyticsQuery.data
+  const anchorDay = toLocalDateKey(anchorNow)
+  useFocusEffect(
+    useCallback(() => {
+      const now = new Date()
+      if (toLocalDateKey(now) !== anchorDay) setAnchorNow(now)
+    }, [anchorDay])
+  )
+
+  const refreshAnalytics = useCallback(async () => {
+    const now = new Date()
+    if (toLocalDateKey(now) !== anchorDay) {
+      setAnchorNow(now)
+      return
+    }
+    await analyticsQuery.refetch()
+  }, [analyticsQuery, anchorDay])
+  const {
+    isRefreshing,
+    onRefresh,
+  } = useManualRefresh(refreshAnalytics)
+  const canPayments =
+    localCanPayments && (analytics?.permissions.payments ?? true)
+  const canPatients =
+    localCanPatients && (analytics?.permissions.patients ?? true)
+  const canAppointments =
+    localCanAppointments && (analytics?.permissions.appointments ?? true)
+  const canVisits = canAppointments || canPayments
+  const canExport =
+    canPayments && canExportData(user)
+  const resolvedCurrency = analytics?.currency ?? currency
+
+  const kpis = useMemo(() => {
+    const revenueCurrent = analytics?.kpis.revenue.current ?? 0
+    const revenuePrevious = analytics?.kpis.revenue.previous ?? 0
+    const patientsCurrent = analytics?.kpis.patients.current ?? 0
+    const patientsPrevious = analytics?.kpis.patients.previous ?? 0
+    const visitsCurrent = analytics?.kpis.visits.current ?? 0
+    const visitsPrevious = analytics?.kpis.visits.previous ?? 0
+    return {
+      revenue: {
+        current: revenueCurrent,
+        previous: revenuePrevious,
+        delta: computeDelta(revenueCurrent, revenuePrevious),
+      },
+      debt: { current: analytics?.kpis.debt.current ?? 0 },
+      patients: {
+        current: patientsCurrent,
+        previous: patientsPrevious,
+        delta: computeDelta(patientsCurrent, patientsPrevious),
+      },
+      visits: {
+        current: visitsCurrent,
+        previous: visitsPrevious,
+        delta: computeDelta(visitsCurrent, visitsPrevious),
+      },
+    }
+  }, [analytics])
+
+  const revenueParts = formatCurrencyParts(kpis.revenue.current, locale as Locale, resolvedCurrency)
+  const debtParts = formatCurrencyParts(kpis.debt.current, locale as Locale, resolvedCurrency)
 
   const statusCounts = useMemo(
-    () => computeAppointmentStatusCounts(appointmentsQuery.data?.data ?? [], range),
-    [appointmentsQuery.data, range]
+    () => {
+      const counts = { scheduled: 0, completed: 0, cancelled: 0, no_show: 0 }
+      for (const row of analytics?.appointment_status ?? []) counts[row.status] = row.count
+      return counts
+    },
+    [analytics]
   )
-  const topDebtors = useMemo(
-    () => computeTopDebtors(treatmentsQuery.data?.data ?? [], range),
-    [treatmentsQuery.data, range]
-  )
+  const topDebtors = analytics?.top_debtors ?? []
   const revenueSeries = useMemo(
-    () => computeRevenueSeries(treatmentsQuery.data?.data ?? [], range),
-    [treatmentsQuery.data, range]
+    () => (analytics?.buckets ?? []).map((bucket) => bucket.revenue),
+    [analytics]
   )
   const growthSeries = useMemo(
-    () => computePatientGrowthSeries(patientsQuery.data?.data ?? [], range),
-    [patientsQuery.data, range]
+    () => (analytics?.buckets ?? []).map((bucket) => bucket.cumulative_patients),
+    [analytics]
   )
+  const statusTotal = STATUS_ORDER.reduce((total, status) => total + statusCounts[status], 0)
+  const effectiveContentWidth = Math.min(screenWidth, ANALYTICS_CONTENT_MAX_WIDTH)
+  const chartWidth = Math.max(220, effectiveContentWidth - spacing.md * 4 - 2)
+  const wideLayout = effectiveContentWidth >= 760
+  const rangeLabel = t(`analytics.range.${range}`)
+  const formatMoney = (value: number) => {
+    const parts = formatCurrencyParts(value, locale as Locale, resolvedCurrency)
+    return `${parts.value} ${parts.unit}`
+  }
+
+  const handleRangeChange = useCallback((nextRange: AnalyticsRange) => {
+    setRange(nextRange)
+    setAnchorNow(new Date())
+  }, [])
+
+  const openOutstandingDebts = () => {
+    navigation.navigate('Tabs', {
+      screen: 'Payments',
+      params: { outstandingOnly: true, requestId: Date.now() },
+    })
+  }
+
+  const handleExport = async () => {
+    if (!analytics || exporting) return
+    setExporting(true)
+    try {
+      await exportAnalyticsPdf(analytics, t(`analytics.range.${range}`), locale as Locale, {
+        title: t('analytics.export.title'),
+        range: t('analytics.export.range'),
+        generatedAt: t('analytics.export.generatedAt'),
+        period: t('analytics.export.period'),
+        revenue: t('analytics.export.revenue'),
+        debt: t('analytics.export.debt'),
+        patients: t('analytics.export.patients'),
+        visits: t('analytics.export.visits'),
+        shareTitle: t('analytics.export.shareTitle'),
+      })
+      toast.success(t('analytics.export.ready'))
+    } catch {
+      toast.error(t('analytics.export.failed'))
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={10} style={styles.backBtn}>
-          <Icon name="chevron-back" size={24} color={c.label as string} />
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>{t('analytics.title')}</Text>
-          <Text style={styles.subtitle}>{t('analytics.subtitle')}</Text>
+      <AppHeader
+        title={t('analytics.title')}
+        subtitle={t('analytics.subtitle')}
+        onBack={navigation.canGoBack?.() ? () => navigation.goBack() : undefined}
+        backLabel={t('common.back')}
+        showProfile
+        actions={
+          canExport ? (
+            <HeaderIconButton
+              icon="download-outline"
+              label={t('analytics.export.action')}
+              onPress={handleExport}
+              disabled={!analytics}
+              loading={exporting}
+            />
+          ) : undefined
+        }
+      />
+
+      {localCanAny ? (
+        <View style={styles.controls}>
+          <AnalyticsRangeSelector
+            value={range}
+            onChange={handleRangeChange}
+            loading={
+              analyticsQuery.isFetching &&
+              !analyticsQuery.isLoading &&
+              !isRefreshing
+            }
+          />
+          {canPayments ? (
+            <AnalyticsCurrencySelector
+              value={currency}
+              onChange={setCurrency}
+            />
+          ) : null}
         </View>
-      </View>
+      ) : null}
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.rangeRow}
-      >
-        {ANALYTICS_RANGES.map((r) => {
-          const active = r === range
-          return (
-            <Pressable
-              key={r}
-              onPress={() => setRange(r)}
-              style={[styles.rangeChip, active && { backgroundColor: c.brand, borderColor: c.brand }]}
-            >
-              <Text style={[styles.rangeText, active && styles.rangeTextActive]}>
-                {t(`analytics.range.${r}`)}
-              </Text>
-            </Pressable>
-          )
-        })}
-      </ScrollView>
-
-      {!canAny ? (
+      {!localCanAny ? (
         <View style={styles.center}>
           <EmptyState iconName="lock-closed-outline" title={t('dashboard.noAccess')} tone="warning" />
         </View>
-      ) : isLoading ? (
+      ) : analyticsQuery.isLoading ? (
+        <AnalyticsLoadingState
+          financial={localCanPayments}
+          patients={localCanPatients}
+          visits={localCanAppointments || localCanPayments}
+          wide={wideLayout}
+        />
+      ) : analyticsQuery.isError ? (
         <View style={styles.center}>
-          <ActivityIndicator color={c.brand as string} />
-        </View>
-      ) : isError ? (
-        <View style={styles.center}>
-          <EmptyState iconName="alert-circle-outline" title={t('analytics.loadFailed')} tone="danger" />
+          <EmptyState
+            iconName="alert-circle-outline"
+            title={t('analytics.loadFailed')}
+            tone="danger"
+            action={
+              <Button
+                title={t('common.retry')}
+                variant="secondary"
+                onPress={() => analyticsQuery.refetch()}
+                fullWidth
+              />
+            }
+          />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xl }}>
+        <ScrollView
+          testID="analytics-scroll"
+          contentContainerStyle={[
+            styles.content,
+            {
+              paddingBottom: getFloatingTabBarContentInset(insets.bottom),
+            },
+          ]}
+          refreshControl={
+            <RefreshControl
+              testID="analytics-refresh-control"
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              tintColor={c.brand as string}
+            />
+          }
+        >
           <View style={styles.grid}>
-            <KpiCard
-              c={c}
-              styles={styles}
-              t={t}
-              label={t('analytics.kpi.revenue')}
-              value={`${revenueParts.value} ${revenueParts.unit}`}
-              kpi={kpis.revenue}
-              locked={!canPayments}
-            />
-            <KpiCard
-              c={c}
-              styles={styles}
-              t={t}
-              label={t('analytics.kpi.debt')}
-              value={`${debtParts.value} ${debtParts.unit}`}
-              kpi={null}
-              locked={!canPayments}
-            />
-            <KpiCard
-              c={c}
-              styles={styles}
-              t={t}
-              label={t('analytics.kpi.patients')}
-              value={String(kpis.patients.current)}
-              kpi={kpis.patients}
-              locked={!canPatients}
-            />
-            <KpiCard
-              c={c}
-              styles={styles}
-              t={t}
-              label={t('analytics.kpi.completion')}
-              value={`${Math.round(kpis.completion.current)}%`}
-              kpi={kpis.completion}
-              locked={!canAppointments}
-            />
+            {canPayments ? (
+              <>
+                <AnalyticsKpiCard
+                  label={t('analytics.kpi.revenue')}
+                  description={t('analytics.kpiDescription.revenue')}
+                  value={`${revenueParts.value} ${revenueParts.unit}`}
+                  delta={kpis.revenue.delta}
+                  icon="wallet-outline"
+                  accent="teal"
+                  wide={wideLayout}
+                />
+                <AnalyticsKpiCard
+                  label={t('analytics.kpi.debt')}
+                  description={t('analytics.kpiDescription.debt')}
+                  value={`${debtParts.value} ${debtParts.unit}`}
+                  delta={null}
+                  tone="negative"
+                  icon="cash-outline"
+                  accent="rose"
+                  wide={wideLayout}
+                />
+              </>
+            ) : null}
+            {canPatients ? (
+              <AnalyticsKpiCard
+                label={t('analytics.kpi.patients')}
+                description={t('analytics.kpiDescription.patients')}
+                value={String(kpis.patients.current)}
+                delta={kpis.patients.delta}
+                icon="people-outline"
+                accent="blue"
+                wide={wideLayout}
+              />
+            ) : null}
+            {canVisits ? (
+              <AnalyticsKpiCard
+                label={t('analytics.kpi.visits')}
+                description={t('analytics.kpiDescription.visits')}
+                value={String(kpis.visits.current)}
+                delta={kpis.visits.delta}
+                icon="checkmark-circle-outline"
+                accent="emerald"
+                wide={wideLayout}
+              />
+            ) : null}
           </View>
 
           {canPayments && revenueSeries.length >= 2 ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t('analytics.revenueTrendTitle')}</Text>
-              <View style={styles.chartCard}>
-                <Sparkline
-                  data={revenueSeries}
-                  width={CHART_WIDTH}
-                  height={72}
-                  strokeColor="#14B8A6"
-                  fillColor="#14B8A6"
-                  strokeWidth={2}
-                />
+              <AnalyticsTrendCard
+                title={t('analytics.revenueTrendTitle')}
+                rangeLabel={rangeLabel}
+                data={revenueSeries}
+                width={chartWidth}
+                color="#14B8A6"
+                icon="trending-up-outline"
+                startValue={formatMoney(revenueSeries[0] ?? 0)}
+                endValue={formatMoney(revenueSeries[revenueSeries.length - 1] ?? 0)}
+              />
+            </View>
+          ) : null}
+
+          {canAppointments ? (
+            <View style={styles.section}>
+              <View style={styles.sectionCard}>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.sectionTitleWrap}>
+                    <View style={styles.sectionIcon}>
+                      <Icon name="pie-chart-outline" size={17} color={c.brand as string} />
+                    </View>
+                    <Text style={styles.sectionTitle}>{t('analytics.statusTitle')}</Text>
+                  </View>
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countBadgeText}>{statusTotal}</Text>
+                  </View>
+                </View>
+
+                {statusTotal > 0 ? (
+                  <View
+                    style={styles.statusDistribution}
+                    accessible
+                    accessibilityRole="image"
+                    accessibilityLabel={STATUS_ORDER.map(
+                      (status) => `${t(`analytics.status.${status}`)}: ${statusCounts[status]}`
+                    ).join(', ')}
+                  >
+                    {STATUS_ORDER.map((status) =>
+                      statusCounts[status] > 0 ? (
+                        <View
+                          key={status}
+                          style={[
+                            styles.statusSegment,
+                            {
+                              flexGrow: statusCounts[status],
+                              backgroundColor: STATUS_COLOR[status],
+                            },
+                          ]}
+                        />
+                      ) : null
+                    )}
+                  </View>
+                ) : null}
+
+                <View style={styles.statusGrid}>
+                  {STATUS_ORDER.map((status) => (
+                    <View
+                      key={status}
+                      style={styles.statusCell}
+                      accessible
+                      accessibilityLabel={`${t(`analytics.status.${status}`)}: ${statusCounts[status]}`}
+                    >
+                      <View style={[styles.dot, { backgroundColor: STATUS_COLOR[status] }]} />
+                      <Text
+                        style={styles.statusLabel}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.78}
+                      >
+                        {t(`analytics.status.${status}`)}
+                      </Text>
+                      <Text style={styles.statusCount}>{statusCounts[status]}</Text>
+                    </View>
+                  ))}
+                </View>
               </View>
             </View>
           ) : null}
 
           {canPatients && growthSeries.length >= 2 ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t('analytics.patientGrowthTitle')}</Text>
-              <View style={styles.chartCard}>
-                <Sparkline
-                  data={growthSeries}
-                  width={CHART_WIDTH}
-                  height={72}
-                  strokeColor="#3B82F6"
-                  fillColor="#3B82F6"
-                  strokeWidth={2}
-                />
-              </View>
-            </View>
-          ) : null}
-
-          {canAppointments ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t('analytics.statusTitle')}</Text>
-              <View style={styles.sectionCard}>
-                {STATUS_ORDER.map((s, i) => (
-                  <View
-                    key={s}
-                    style={[styles.statusRow, i < STATUS_ORDER.length - 1 && styles.rowDivider]}
-                  >
-                    <View style={[styles.dot, { backgroundColor: STATUS_COLOR[s] }]} />
-                    <Text style={styles.statusLabel}>{t(`analytics.status.${s}`)}</Text>
-                    <Text style={styles.statusCount}>{statusCounts[s]}</Text>
-                  </View>
-                ))}
-              </View>
+              <AnalyticsTrendCard
+                title={t('analytics.patientGrowthTitle')}
+                rangeLabel={rangeLabel}
+                data={growthSeries}
+                width={chartWidth}
+                color="#3B82F6"
+                icon="people-outline"
+                startValue={String(growthSeries[0] ?? 0)}
+                endValue={String(growthSeries[growthSeries.length - 1] ?? 0)}
+              />
             </View>
           ) : null}
 
           {canPayments ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t('analytics.topDebtorsTitle')}</Text>
-              {topDebtors.length === 0 ? (
-                <Text style={styles.emptyText}>{t('analytics.topDebtorsEmpty')}</Text>
-              ) : (
-                <View style={styles.sectionCard}>
-                  {topDebtors.map((d, i) => {
-                    const parts = formatCurrencyParts(d.debt, locale as Locale)
-                    return (
-                      <View
-                        key={d.patientId}
-                        style={[styles.debtorRow, i < topDebtors.length - 1 && styles.rowDivider]}
-                      >
-                        <Text style={styles.debtorRank}>{i + 1}</Text>
-                        <Text style={styles.debtorName} numberOfLines={1}>
-                          {d.name}
+              <View style={styles.sectionCard}>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.sectionTitleWrap}>
+                    <View style={[styles.sectionIcon, styles.sectionIconDanger]}>
+                      <Icon name="alert-circle-outline" size={17} color="#C7464D" />
+                    </View>
+                    <View style={styles.sectionHeadingCopy}>
+                      <Text style={styles.sectionTitle}>{t('analytics.topDebtorsTitle')}</Text>
+                      {topDebtors.length > 0 ? (
+                        <Text style={styles.sectionSubtitle}>
+                          {formatMoney(
+                            topDebtors.reduce((total, debtor) => total + debtor.debt, 0)
+                          )}
                         </Text>
-                        <Text style={styles.debtorDebt}>
-                          {parts.value} {parts.unit}
-                        </Text>
-                      </View>
-                    )
-                  })}
+                      ) : null}
+                    </View>
+                  </View>
+                  <Pressable
+                    onPress={openOutstandingDebts}
+                    style={({ pressed }) => [
+                      styles.debtorsAction,
+                      pressed && styles.debtorsActionPressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('analytics.allDebts')}
+                  >
+                    <Text style={styles.debtorsActionText}>{t('analytics.allDebts')}</Text>
+                    <Icon name="chevron-forward" size={13} color={c.brand as string} />
+                  </Pressable>
                 </View>
-              )}
+
+                {topDebtors.length === 0 ? (
+                  <View style={styles.emptyRow}>
+                    <Icon name="checkmark-circle-outline" size={18} color={c.success as string} />
+                    <Text style={styles.emptyText}>{t('analytics.topDebtorsEmpty')}</Text>
+                  </View>
+                ) : (
+                  topDebtors.map((debtor, index) => {
+                    const phone = formatStoredPhone(debtor.phone)
+                    return (
+                      <React.Fragment key={`${debtor.name}-${debtor.phone}-${index}`}>
+                        <View
+                          style={styles.debtorRow}
+                          accessible
+                          accessibilityLabel={`${index + 1}. ${debtor.name}. ${formatMoney(debtor.debt)}`}
+                        >
+                          <View style={styles.debtorRank}>
+                            <Text style={styles.debtorRankText}>{index + 1}</Text>
+                          </View>
+                          <View style={styles.debtorCopy}>
+                            <Text style={styles.debtorName} numberOfLines={1}>
+                              {debtor.name}
+                            </Text>
+                            {phone ? (
+                              <Text style={styles.debtorPhone} numberOfLines={1}>
+                                {phone}
+                              </Text>
+                            ) : null}
+                          </View>
+                          <Text
+                            style={styles.debtorDebt}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.7}
+                          >
+                            {formatMoney(debtor.debt)}
+                          </Text>
+                        </View>
+                        {index < topDebtors.length - 1 ? (
+                          <View style={styles.rowDivider} />
+                        ) : null}
+                      </React.Fragment>
+                    )
+                  })
+                )}
+              </View>
             </View>
           ) : null}
         </ScrollView>
@@ -297,58 +541,40 @@ export default function AnalyticsScreen() {
   )
 }
 
-function KpiCard({
-  c,
-  styles,
-  t,
-  label,
-  value,
-  kpi,
-  locked,
+function AnalyticsLoadingState({
+  financial,
+  patients,
+  visits,
+  wide,
 }: {
-  c: Colors
-  styles: ReturnType<typeof makeStyles>
-  t: (k: string) => string
-  label: string
-  value: string
-  kpi: KpiValue | null
-  locked: boolean
+  financial: boolean
+  patients: boolean
+  visits: boolean
+  wide: boolean
 }) {
-  if (locked) {
-    return (
-      <View style={styles.card}>
-        <View style={styles.lockRow}>
-          <Icon name="lock-closed-outline" size={14} color={c.labelTertiary as string} />
-          <Text style={styles.cardLabel}>{label}</Text>
-        </View>
-        <Text style={styles.lockedValue}>{t('dashboard.noAccess')}</Text>
-      </View>
-    )
-  }
-  const delta = kpi?.delta ?? null
-  const up = delta != null && delta >= 0
+  const { t } = useI18n()
+  const c = useColors()
+  const styles = useMemo(() => makeStyles(c), [c])
+  const cardCount = (financial ? 2 : 0) + (patients ? 1 : 0) + (visits ? 1 : 0)
+
   return (
-    <View style={styles.card}>
-      <Text style={styles.cardLabel}>{label}</Text>
-      <Text style={styles.cardValue} numberOfLines={1}>
-        {value}
-      </Text>
-      {kpi === null ? (
-        <Text style={styles.deltaNeutral}>—</Text>
-      ) : delta == null ? (
-        <Text style={styles.deltaNeutral}>{t('analytics.noBaseline')}</Text>
-      ) : (
-        <View style={styles.deltaRow}>
-          <Icon
-            name={up ? 'arrow-up' : 'arrow-down'}
-            size={13}
-            color={(up ? c.success : c.danger) as string}
+    <View
+      style={styles.loadingContent}
+      accessibilityRole="progressbar"
+      accessibilityLabel={t('common.loading')}
+    >
+      <View style={styles.grid}>
+        {Array.from({ length: cardCount }).map((_, index) => (
+          <Skeleton
+            key={index}
+            height={108}
+            borderRadius={radius.xl}
+            style={[styles.loadingKpi, wide && styles.loadingKpiWide]}
           />
-          <Text style={[styles.deltaText, { color: (up ? c.success : c.danger) as string }]}>
-            {Math.abs(delta).toFixed(0)}%
-          </Text>
-        </View>
-      )}
+        ))}
+      </View>
+      <Skeleton width="100%" height={150} borderRadius={radius.xl} />
+      <Skeleton width="100%" height={150} borderRadius={radius.xl} />
     </View>
   )
 }
@@ -356,78 +582,244 @@ function KpiCard({
 function makeStyles(c: Colors) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: c.groupedBackground ?? c.background },
-    header: {
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+    controls: {
+      width: '100%',
+      maxWidth: ANALYTICS_CONTENT_MAX_WIDTH,
+      alignSelf: 'center',
+      paddingHorizontal: spacing.md,
+    },
+    content: {
+      width: '100%',
+      maxWidth: ANALYTICS_CONTENT_MAX_WIDTH,
+      alignSelf: 'center',
+      padding: spacing.md,
+    },
+    loadingContent: {
+      width: '100%',
+      maxWidth: ANALYTICS_CONTENT_MAX_WIDTH,
+      alignSelf: 'center',
+      gap: 10,
+      padding: spacing.md,
+    },
+    loadingKpi: {
+      width: '47.8%',
+      flexGrow: 1,
+    },
+    loadingKpiWide: {
+      width: '23.4%',
+    },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+    section: { marginTop: 10 },
+    sectionCard: {
+      overflow: 'hidden',
+      backgroundColor: c.background,
+      borderRadius: radius.xl,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.brandSoft,
+      ...shadows.sm,
+    },
+    sectionHeader: {
+      minHeight: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingTop: 6,
+    },
+    sectionTitleWrap: {
+      flex: 1,
+      minWidth: 0,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
     },
-    backBtn: { padding: 4, marginLeft: -4 },
-    title: { ...typography.title2, color: c.label },
-    subtitle: { ...typography.footnote, color: c.labelSecondary },
-    rangeRow: { gap: 8, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
-    rangeChip: {
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: radius.pill,
-      backgroundColor: c.background,
-      borderWidth: 1,
-      borderColor: c.separator as string,
+    sectionHeadingCopy: {
+      flex: 1,
+      minWidth: 0,
+      gap: 1,
     },
-    rangeText: { ...typography.subhead, color: c.labelSecondary, fontWeight: '600' },
-    rangeTextActive: { color: '#FFFFFF' },
-    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-    grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-    card: {
-      width: '47.8%',
-      flexGrow: 1,
-      backgroundColor: c.background,
-      borderRadius: radius.xl,
-      padding: spacing.md,
-      gap: 6,
-      borderWidth: 1,
-      borderColor: c.separator as string,
-    },
-    cardLabel: { ...typography.footnote, color: c.labelSecondary },
-    cardValue: { ...typography.title2, color: c.label, fontFamily: font('700'), fontWeight: '700' },
-    deltaRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-    deltaText: { ...typography.caption1, fontWeight: '700' },
-    deltaNeutral: { ...typography.caption1, color: c.labelTertiary },
-    lockRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    lockedValue: { ...typography.subhead, color: c.labelTertiary },
-    section: { marginTop: spacing.lg, gap: spacing.sm },
-    sectionTitle: { ...typography.headline, color: c.label, paddingHorizontal: 2 },
-    sectionCard: {
-      backgroundColor: c.background,
-      borderRadius: radius.xl,
-      borderWidth: 1,
-      borderColor: c.separator as string,
-      paddingHorizontal: spacing.md,
-    },
-    chartCard: {
-      backgroundColor: c.background,
-      borderRadius: radius.xl,
-      borderWidth: 1,
-      borderColor: c.separator as string,
-      padding: spacing.md,
-      alignItems: 'center',
-    },
-    rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.separator as string },
-    statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
-    dot: { width: 10, height: 10, borderRadius: 5 },
-    statusLabel: { flex: 1, ...typography.body, color: c.label },
-    statusCount: { ...typography.body, color: c.labelSecondary, fontFamily: font('700'), fontWeight: '700' },
-    debtorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
-    debtorRank: {
-      width: 22,
-      ...typography.footnote,
+    sectionSubtitle: {
+      fontFamily: font('600'),
+      fontSize: 10,
+      lineHeight: 13,
+      fontWeight: '600',
       color: c.labelTertiary,
-      fontFamily: font('700'),
-      fontWeight: '700',
     },
-    debtorName: { flex: 1, ...typography.body, color: c.label },
-    debtorDebt: { ...typography.subhead, color: c.danger, fontFamily: font('700'), fontWeight: '700' },
-    emptyText: { ...typography.subhead, color: c.labelTertiary, paddingHorizontal: 2 },
+    debtorsAction: {
+      minHeight: 36,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 2,
+      paddingHorizontal: 8,
+      borderRadius: radius.md,
+      backgroundColor: c.brandSurface,
+    },
+    debtorsActionPressed: {
+      opacity: 0.72,
+    },
+    debtorsActionText: {
+      fontFamily: font('700'),
+      fontSize: 10,
+      lineHeight: 13,
+      fontWeight: '700',
+      color: c.brand,
+    },
+    sectionIcon: {
+      width: 32,
+      height: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.md,
+      backgroundColor: c.brandSurface,
+    },
+    sectionIconDanger: {
+      backgroundColor: '#FFF1F2',
+    },
+    sectionTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontFamily: font('700'),
+      fontSize: 14,
+      lineHeight: 18,
+      fontWeight: '700',
+      color: c.label,
+    },
+    countBadge: {
+      minWidth: 28,
+      height: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 8,
+      borderRadius: radius.pill,
+      backgroundColor: c.fillQuaternary,
+    },
+    countBadgeText: {
+      fontFamily: font('700'),
+      fontSize: 11,
+      lineHeight: 14,
+      fontWeight: '700',
+      color: c.labelSecondary,
+    },
+    statusDistribution: {
+      height: 7,
+      flexDirection: 'row',
+      gap: 2,
+      overflow: 'hidden',
+      marginHorizontal: 12,
+      marginTop: 3,
+      borderRadius: radius.pill,
+      backgroundColor: c.fillQuaternary,
+    },
+    statusSegment: {
+      flexBasis: 0,
+      minWidth: 3,
+      borderRadius: radius.pill,
+    },
+    statusGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+      padding: 10,
+    },
+    statusCell: {
+      width: '48.8%',
+      minHeight: 38,
+      flexGrow: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+      paddingHorizontal: 9,
+      paddingVertical: 6,
+      borderRadius: radius.md,
+      backgroundColor: c.backgroundTertiary,
+    },
+    dot: { width: 8, height: 8, flexShrink: 0, borderRadius: 4 },
+    statusLabel: {
+      flex: 1,
+      minWidth: 0,
+      fontFamily: font('500'),
+      fontSize: 11,
+      lineHeight: 14,
+      fontWeight: '500',
+      color: c.labelSecondary,
+    },
+    statusCount: {
+      fontFamily: font('700'),
+      fontSize: 13,
+      lineHeight: 16,
+      fontWeight: '700',
+      color: c.label,
+    },
+    rowDivider: {
+      height: StyleSheet.hairlineWidth,
+      marginLeft: 52,
+      backgroundColor: c.separator,
+    },
+    debtorRow: {
+      minHeight: 52,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+    },
+    debtorRank: {
+      width: 30,
+      height: 30,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.md,
+      backgroundColor: c.brandSurface,
+    },
+    debtorRankText: {
+      fontFamily: font('700'),
+      fontSize: 11,
+      lineHeight: 14,
+      fontWeight: '700',
+      color: c.brand,
+    },
+    debtorCopy: {
+      flex: 1,
+      minWidth: 0,
+      gap: 1,
+    },
+    debtorName: {
+      fontFamily: font('600'),
+      fontSize: 13,
+      lineHeight: 17,
+      fontWeight: '600',
+      color: c.label,
+    },
+    debtorPhone: {
+      fontFamily: font('400'),
+      fontSize: 10.5,
+      lineHeight: 13,
+      fontWeight: '400',
+      color: c.labelTertiary,
+    },
+    debtorDebt: {
+      maxWidth: '38%',
+      fontFamily: font('700'),
+      fontSize: 12,
+      lineHeight: 16,
+      fontWeight: '700',
+      color: '#C7464D',
+      textAlign: 'right',
+    },
+    emptyRow: {
+      minHeight: 50,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 7,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    emptyText: {
+      ...typography.subhead,
+      color: c.labelSecondary,
+    },
   })
 }

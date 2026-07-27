@@ -2,6 +2,8 @@ import MockAdapter from 'axios-mock-adapter'
 import client from '../client'
 import {
   createPatientTreatment,
+  listPatientTreatments,
+  listTreatments,
   updatePatientTreatment,
   deletePatientTreatment,
   getPatientTreatment,
@@ -61,6 +63,7 @@ describe('treatments CRUD', () => {
         comment: 'note',
         debt_amount: 100000,
         paid_amount: 0,
+        currency: 'USD',
       })
       return [201, { data: sample }]
     })
@@ -72,6 +75,7 @@ describe('treatments CRUD', () => {
       comment: 'note',
       debt_amount: 100000,
       paid_amount: 0,
+      currency: 'USD',
     })
     expect(result.id).toBe('tx-1')
     // Normalizer ensures images is always an array, even if backend omits.
@@ -110,6 +114,53 @@ describe('treatments CRUD', () => {
     })
     await getPatientTreatment('p-1', 'tx-1')
     expect(qsSeen).toContain('include_images=true')
+  })
+
+  it('passes patient scope and explicit pagination to treatment history', async () => {
+    mock.onGet('/treatments').reply((config) => {
+      expect(config.params).toMatchObject({
+        'filter[patient_id]': 'p-1',
+        page: 2,
+        per_page: 10,
+        sort: '-treatment_date,-created_at',
+      })
+      return [
+        200,
+        {
+          data: [sample],
+          meta: {
+            pagination: { page: 2, total_pages: 3, per_page: 10, total: 21 },
+          },
+        },
+      ]
+    })
+
+    const result = await listTreatments({ patient_id: 'p-1', page: 2, per_page: 10 })
+    expect(result.meta.pagination.total).toBe(21)
+  })
+
+  it('uses the patients.view-scoped endpoint for patient record history', async () => {
+    mock.onGet('/patients/p-1/treatments').reply((config) => {
+      expect(config.params).toMatchObject({
+        page: 2,
+        per_page: 10,
+        sort: '-treatment_date,-created_at',
+        include_images: 1,
+      })
+      return [
+        200,
+        {
+          data: [sample],
+          meta: {
+            pagination: { page: 2, total_pages: 3, per_page: 10, total: 21 },
+          },
+        },
+      ]
+    })
+
+    const result = await listPatientTreatments('p-1', { page: 2, per_page: 10 })
+    expect(result.meta.pagination.total).toBe(21)
+    expect(result.data[0]?.id).toBe('tx-1')
   })
 
   it('throws OfflineError on create when the network store says offline', async () => {

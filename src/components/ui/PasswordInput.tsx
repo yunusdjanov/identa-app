@@ -27,7 +27,12 @@ const PasswordInput = forwardRef<TextInput, Props>(function PasswordInput(
       autoCapitalize="none"
       autoCorrect={false}
       rightAccessory={
-        <Pressable onPress={() => setVisible((v) => !v)} hitSlop={10}>
+        <Pressable
+          onPress={() => setVisible((v) => !v)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={visible ? hideLabel : showLabel}
+        >
           <Text style={styles.toggle}>{visible ? hideLabel : showLabel}</Text>
         </Pressable>
       }

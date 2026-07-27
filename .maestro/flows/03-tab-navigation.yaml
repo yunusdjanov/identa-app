@@ -12,6 +12,7 @@ tags:
 
 # Dashboard is the landing tab — just confirm header.
 - assertVisible: "Bosh sahifa"
+- assertVisible: "Haftalik reja"
 
 # Patients tab
 - tapOn: "Bemorlar"
@@ -19,10 +20,10 @@ tags:
     visible: "Bemorlar"
     timeout: 10000
 
-# Appointments tab
-- tapOn: "Navbatlar"
+# Analytics tab
+- tapOn: "Analitika"
 - extendedWaitUntil:
-    visible: "Navbatlar"
+    visible: "Analitika"
     timeout: 10000
 
 # Payments tab
@@ -33,4 +34,4 @@ tags:
 
 # Back to Dashboard — confirm we can navigate freely
 - tapOn: "Bosh sahifa"
-- assertVisible: "Bosh sahifa"
+- assertVisible: "Haftalik reja"

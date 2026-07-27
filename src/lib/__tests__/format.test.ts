@@ -48,6 +48,11 @@ describe('formatCurrencyParts', () => {
     expect(r.unit).toBe("so'm")
     expect(r.value).toContain('500')
   })
+
+  it('keeps USD values explicitly separate from UZS', () => {
+    expect(formatCurrencyParts(150.25, 'uz', 'USD')).toEqual({ value: '150,25', unit: 'USD' })
+    expect(formatCurrencyParts(2_500, 'en', 'USD')).toEqual({ value: '2.5', unit: 'K USD' })
+  })
 })
 
 describe('formatCurrency (single string)', () => {

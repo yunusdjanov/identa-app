@@ -6,6 +6,7 @@
 import MockAdapter from 'axios-mock-adapter'
 import client, { ApiError, isApiError } from '../client'
 import { useAuthStore } from '../../stores/auth'
+import { setCurrentLocale } from '../../lib/currentLocale'
 
 // Helper: prime the auth store with a token so the request interceptor
 // attaches it without going through the real login flow.
@@ -44,6 +45,7 @@ describe('ApiError + normalizeError', () => {
   afterEach(() => {
     mock.restore()
     clearAuth()
+    setCurrentLocale('ru')
   })
 
   it('attaches the Bearer token from the auth store', async () => {
@@ -99,6 +101,32 @@ describe('ApiError + normalizeError', () => {
     })
   })
 
+  it('logs out on the backend account_inactive error envelope', async () => {
+    mock.onGet('/auth/me').reply(403, {
+      error: { code: 'account_inactive', message: 'Account inactive.' },
+    })
+
+    await expect(client.get('/auth/me')).rejects.toMatchObject({ kind: 'forbidden' })
+    expect(useAuthStore.getState().isAuthenticated).toBe(false)
+  })
+
+  it('sends the active locale on every API request', async () => {
+    setCurrentLocale('uz')
+    mock.onGet('/auth/me').reply((config) => {
+      expect(config.headers?.['Accept-Language']).toBe('uz')
+      return [200, { data: { id: '1' } }]
+    })
+    await client.get('/auth/me')
+  })
+
+  it('normalizes 429 to rate_limited', async () => {
+    mock.onPost('/auth/login').reply(429, {})
+    await expect(client.post('/auth/login')).rejects.toMatchObject({
+      kind: 'rate_limited',
+      status: 429,
+    })
+  })
+
   it('normalizes unmapped status to unknown', async () => {
     mock.onGet('/teapot').reply(418, { message: 'no coffee' })
     await expect(client.get('/teapot')).rejects.toMatchObject({ kind: 'unknown' })
@@ -141,6 +169,11 @@ describe('401 → refresh → retry', () => {
     const singletonMock = new MockAdapter(axios)
     singletonMock.onPost(/auth\/refresh$/).reply(200, {
       data: {
+        id: '1',
+        name: 'Refreshed User',
+        email: 't@t',
+        role: 'dentist',
+        account_status: 'active',
         tokens: {
           access_token: 'new-access',
           refresh_token: 'new-refresh',
@@ -154,6 +187,7 @@ describe('401 → refresh → retry', () => {
     const res = await client.get('/secret')
     expect(res.data).toEqual({ data: 'ok' })
     expect(useAuthStore.getState().tokens?.access_token).toBe('new-access')
+    expect(useAuthStore.getState().user?.name).toBe('Refreshed User')
     singletonMock.restore()
   })
 
@@ -163,5 +197,49 @@ describe('401 → refresh → retry', () => {
 
     await expect(client.get('/secret')).rejects.toMatchObject({ kind: 'unauthorized' })
     expect(useAuthStore.getState().isAuthenticated).toBe(false)
+  })
+
+  it('does not restore a session that logged out while refresh was in flight', async () => {
+    mock.onGet('/secret').reply(401, { message: 'expired' })
+
+    let signalRefreshStarted!: () => void
+    const refreshStarted = new Promise<void>((resolve) => {
+      signalRefreshStarted = resolve
+    })
+    let resolveRefresh!: (value: [number, unknown]) => void
+    const refreshResponse = new Promise<[number, unknown]>((resolve) => {
+      resolveRefresh = resolve
+    })
+    const axios = require('axios')
+    const singletonMock = new MockAdapter(axios)
+    singletonMock.onPost(/auth\/refresh$/).reply(() => {
+      signalRefreshStarted()
+      return refreshResponse
+    })
+
+    const request = client.get('/secret')
+    await refreshStarted
+    useAuthStore.getState().logout()
+    resolveRefresh([200, {
+      data: {
+        id: '1',
+        name: 'Stale User',
+        email: 't@t',
+        role: 'dentist',
+        account_status: 'active',
+        tokens: {
+          access_token: 'stale-access',
+          refresh_token: 'stale-refresh',
+          token_type: 'Bearer',
+          expires_in: 900,
+          refresh_expires_in: 2592000,
+        },
+      },
+    }])
+
+    await expect(request).rejects.toMatchObject({ kind: 'unauthorized' })
+    expect(useAuthStore.getState().isAuthenticated).toBe(false)
+    expect(useAuthStore.getState().user).toBeNull()
+    singletonMock.restore()
   })
 })

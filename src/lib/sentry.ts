@@ -1,5 +1,11 @@
 import * as Sentry from '@sentry/react-native'
 import Constants from 'expo-constants'
+import {
+  TELEMETRY_REDACTED,
+  sanitizeTelemetryUrl,
+  sanitizeXhrBreadcrumbData,
+  scrubTelemetryValue,
+} from './telemetryPrivacy'
 
 // Mobile client crash + error reporter.
 //
@@ -49,16 +55,12 @@ export function initSentry(): void {
       return scrubSensitive(event)
     },
     beforeBreadcrumb(crumb) {
-      // Don't record breadcrumbs from `/auth/login` request URLs — the URL
-      // is fine but the body would carry plaintext credentials in some
-      // SDK versions. Drop the whole crumb to be safe.
-      if (crumb.category === 'xhr' && typeof crumb.data?.url === 'string') {
-        if (crumb.data.url.includes('/auth/login') ||
-            crumb.data.url.includes('/auth/register') ||
-            crumb.data.url.includes('/auth/reset-password') ||
-            crumb.data.url.includes('/auth/change-password')) {
-          // Keep the breadcrumb but strip the body.
-          return { ...crumb, data: { ...crumb.data, body: '[scrubbed]' } }
+      if (crumb.category === 'xhr') {
+        return {
+          ...crumb,
+          data: sanitizeXhrBreadcrumbData(
+            crumb.data as Record<string, unknown> | undefined
+          ),
         }
       }
       return crumb
@@ -106,7 +108,7 @@ export function captureError(error: unknown, context?: Record<string, unknown>):
 export const wrapApp = Sentry.wrap
 
 interface ScrubbableEvent {
-  request?: { data?: unknown; headers?: Record<string, string> }
+  request?: { data?: unknown; headers?: Record<string, string>; url?: string }
   extra?: Record<string, unknown>
 }
 
@@ -121,27 +123,19 @@ function scrubSensitive<T extends ScrubbableEvent>(event: T): T {
     }
     event.request.headers = headers
   }
-  // Defensive sweep for password-like fields anywhere in request body / extras
-  if (event.request?.data && typeof event.request.data === 'object') {
-    event.request.data = scrubFields(event.request.data as Record<string, unknown>)
+  if (event.request?.url) {
+    event.request.url = sanitizeTelemetryUrl(event.request.url)
+  }
+  // String request bodies cannot be inspected safely. Structured values are
+  // recursively scrubbed, including clinical fields nested in arrays.
+  if (event.request?.data != null) {
+    event.request.data =
+      typeof event.request.data === 'string'
+        ? TELEMETRY_REDACTED
+        : scrubTelemetryValue(event.request.data)
   }
   if (event.extra && typeof event.extra === 'object') {
-    event.extra = scrubFields(event.extra as Record<string, unknown>)
+    event.extra = scrubTelemetryValue(event.extra) as Record<string, unknown>
   }
   return event
-}
-
-function scrubFields(obj: Record<string, unknown>): Record<string, unknown> {
-  const SENSITIVE = /password|token|secret|authorization|cookie|csrf/i
-  const out: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(obj)) {
-    if (SENSITIVE.test(key)) {
-      out[key] = '[scrubbed]'
-    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
-      out[key] = scrubFields(value as Record<string, unknown>)
-    } else {
-      out[key] = value
-    }
-  }
-  return out
 }

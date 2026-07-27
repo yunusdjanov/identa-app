@@ -6,30 +6,32 @@ import * as Haptics from 'expo-haptics'
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs'
 import Icon, { IconName } from '../ui/Icon'
 import CreateActionSheet from './CreateActionSheet'
-import { useToast } from '../ui/Toast'
 import { useI18n } from '../../i18n'
 import { useUIStore } from '../../stores/ui'
 import { useThemeStore } from '../../stores/theme'
 import { useAuthStore } from '../../stores/auth'
 import { canManage } from '../../lib/permissions'
 import { radius, shadows, font } from '../../constants/theme'
+import {
+  FLOATING_TAB_BAR_MIN_BOTTOM_INSET,
+  FLOATING_TAB_BAR_MIN_HEIGHT,
+} from '../../constants/navigation'
 import { useColors, type Colors } from '../../lib/useColors'
 
 const TAB_ICONS: Record<string, { active: IconName; inactive: IconName }> = {
   Dashboard:    { active: 'home',     inactive: 'home-outline' },
   Patients:     { active: 'people',   inactive: 'people-outline' },
-  Appointments: { active: 'calendar', inactive: 'calendar-outline' },
+  Analytics:    { active: 'stats-chart', inactive: 'stats-chart-outline' },
   Payments:     { active: 'card',     inactive: 'card-outline' },
 }
 
 const FAB_SIZE = 58
 const LEFT_TABS = ['Dashboard', 'Patients']
-const RIGHT_TABS = ['Appointments', 'Payments']
+const RIGHT_TABS = ['Analytics', 'Payments']
 
 export default function CustomTabBar({ state, navigation, descriptors }: BottomTabBarProps) {
   const insets = useSafeAreaInsets()
   const { t } = useI18n()
-  const toast = useToast()
   const c = useColors()
   const effective = useThemeStore((s) => s.effective)
   const styles = useMemo(() => makeStyles(c, effective), [c, effective])
@@ -48,7 +50,12 @@ export default function CustomTabBar({ state, navigation, descriptors }: BottomT
     const target = state.routes.find((r) => r.name === name)
     if (!target) return
     const isFocused = state.routes[state.index]?.name === name
-    if (!isFocused) {
+    const event = navigation.emit({
+      type: 'tabPress',
+      target: target.key,
+      canPreventDefault: true,
+    })
+    if (!isFocused && !event.defaultPrevented) {
       navigation.navigate(target.name)
     }
   }
@@ -66,7 +73,7 @@ export default function CustomTabBar({ state, navigation, descriptors }: BottomT
     useUIStore.getState().openPatientForm(null)
   }
 
-  const bottomPad = Math.max(insets.bottom, 16)
+  const bottomPad = Math.max(insets.bottom, FLOATING_TAB_BAR_MIN_BOTTOM_INSET)
 
   return (
     <>
@@ -110,6 +117,8 @@ export default function CustomTabBar({ state, navigation, descriptors }: BottomT
         {canCreate ? (
           <Pressable
             onPress={openFab}
+            accessibilityRole="button"
+            accessibilityLabel={t('create.title')}
             style={({ pressed }) => [
               styles.fabWrap,
               { bottom: bottomPad + 18 },
@@ -163,7 +172,14 @@ function TabButton({ routeName, state, descriptors, onPress }: TabButtonProps) {
   const color = focused ? (c.brand as string) : (c.labelSecondary as string)
 
   return (
-    <Pressable onPress={onPress} style={styles.tabBtn} hitSlop={6}>
+    <Pressable
+      onPress={onPress}
+      style={styles.tabBtn}
+      hitSlop={6}
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: focused }}
+    >
       <Icon name={iconName} size={22} color={color} />
       <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
         {label}
@@ -200,7 +216,7 @@ function makeStyles(c: Colors, effective: 'light' | 'dark') {
       paddingHorizontal: 14,
       paddingVertical: 10,
       width: '92%',
-      minHeight: 64,
+      minHeight: FLOATING_TAB_BAR_MIN_HEIGHT,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: effective === 'dark' ? c.separator as string : 'rgba(0,0,0,0.06)',
     },

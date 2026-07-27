@@ -75,7 +75,4 @@ module.exports = {
       statements: 80,
     },
   },
-  // Jest can hang on lingering setTimeout/setInterval from RN polyfills if we
-  // don't force-exit. Keeps CI from running over.
-  forceExit: true,
 }

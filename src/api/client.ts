@@ -1,6 +1,9 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { API_URL } from '../constants'
 import { captureError } from '../lib/sentry'
+import { getCurrentLocale } from '../lib/currentLocale'
+import type { ApiUser } from '../types'
+import type { AuthTokens } from '../stores/auth'
 
 // Normalized error surface so React Query / call sites can branch on
 // `kind` instead of inspecting raw axios shapes. `kind` is the only field
@@ -12,6 +15,7 @@ export type ApiErrorKind =
   | 'forbidden'    // 403 — user can't do this action
   | 'not_found'    // 404
   | 'validation'   // 422 — backend rejected with field errors
+  | 'rate_limited' // 429 — too many attempts
   | 'server'       // 5xx
   | 'unknown'      // anything else
 
@@ -37,6 +41,13 @@ export class ApiError extends Error {
     this.fieldErrors = opts?.fieldErrors
     this.cause = opts?.cause
   }
+}
+
+function getResponseErrorCode(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined
+  const response = payload as { code?: unknown; error?: { code?: unknown } }
+  const code = response.error?.code ?? response.code
+  return typeof code === 'string' ? code : undefined
 }
 
 const client = axios.create({
@@ -69,6 +80,7 @@ interface RetryableConfig extends InternalAxiosRequestConfig {
 // store can hydrate after this module loads).
 client.interceptors.request.use((config) => {
   const cfg = config as RetryableConfig
+  cfg.headers.set('Accept-Language', getCurrentLocale())
   if (cfg._skipAuthHeader) return cfg
   // Dynamic require avoids a circular import at module load.
   // `getState()` returns the latest snapshot, so token rotation after
@@ -99,12 +111,28 @@ async function performRefresh(): Promise<string | null> {
       `${API_URL}/auth/refresh`,
       { refresh_token: refreshToken },
       {
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'Accept-Language': getCurrentLocale(),
+        },
         timeout: 20_000,
       }
     )
-    const tokens = response.data?.data?.tokens
-    if (tokens?.access_token && tokens?.refresh_token) {
+    const currentSession = useAuthStore.getState()
+    if (
+      !currentSession.isAuthenticated ||
+      currentSession.tokens?.refresh_token !== refreshToken
+    ) {
+      return null
+    }
+    const data = response.data?.data as (ApiUser & { tokens?: AuthTokens }) | undefined
+    const tokens = data?.tokens
+    if (data && tokens?.access_token && tokens?.refresh_token) {
+      const { tokens: _tokens, ...user } = data
+      if (user.id) {
+        useAuthStore.getState().setUser(user as ApiUser)
+      }
       useAuthStore.getState().setTokens(tokens)
       return tokens.access_token
     }
@@ -148,12 +176,12 @@ client.interceptors.response.use(
     }
 
     // Account blocked/deleted mid-session: the backend returns 403 with
-    // `code: 'account_inactive'` (AuthController). Treat it like a session end
+    // `error.code: 'account_inactive'` (AuthController). Treat it like a session end
     // — drop local state so the app falls back to login. Gated on the specific
     // code so ordinary permission-denied 403s don't sign the user out.
     if (
       normalized.kind === 'forbidden' &&
-      (error.response?.data as { code?: string } | undefined)?.code === 'account_inactive'
+      getResponseErrorCode(error.response?.data) === 'account_inactive'
     ) {
       const { useAuthStore } = require('../stores/auth') as typeof import('../stores/auth')
       useAuthStore.getState().logout()
@@ -205,6 +233,9 @@ function normalizeError(error: AxiosError): ApiError {
       fieldErrors: data?.errors,
       cause: error,
     })
+  }
+  if (status === 429) {
+    return new ApiError('Too many requests', 'rate_limited', { status, cause: error })
   }
   if (status >= 500) {
     return new ApiError(data?.message ?? 'Server error', 'server', { status, cause: error })

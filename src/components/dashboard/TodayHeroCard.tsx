@@ -11,13 +11,20 @@ import { formatTime } from '../../lib/format'
 import type { DashboardAppointmentView } from '../../types'
 
 interface Props {
-  count: number
+  totalCount: number
+  remainingCount: number
   next?: DashboardAppointmentView | null
   onPressViewAll?: () => void
   onPressNext?: () => void
 }
 
-export default function TodayHeroCard({ count, next, onPressViewAll, onPressNext }: Props) {
+export default function TodayHeroCard({
+  totalCount,
+  remainingCount,
+  next,
+  onPressViewAll,
+  onPressNext,
+}: Props) {
   const { t } = useI18n()
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
@@ -37,10 +44,7 @@ export default function TodayHeroCard({ count, next, onPressViewAll, onPressNext
   }
 
   return (
-    <Pressable
-      onPress={handleViewAll}
-      style={({ pressed }) => pressed && { opacity: 0.95 }}
-    >
+    <View>
       <LinearGradient
         colors={[c.brand, '#0E9C8E']}
         start={{ x: 0, y: 0 }}
@@ -57,13 +61,24 @@ export default function TodayHeroCard({ count, next, onPressViewAll, onPressNext
             <Text style={styles.headerLabel}>{t('dashboard.today')}</Text>
           </View>
           {onPressViewAll ? (
-            <Icon name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+            <Pressable
+              onPress={handleViewAll}
+              hitSlop={10}
+              style={({ pressed }) => pressed && { opacity: 0.65 }}
+              accessibilityRole="button"
+              accessibilityLabel={t('dashboard.viewAll')}
+            >
+              <Icon name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+            </Pressable>
           ) : null}
         </View>
 
         <View style={styles.metricBlock}>
-          <Text style={styles.value}>{count}</Text>
-          <Text style={styles.unit}>{t('dashboard.appointmentsShort')}</Text>
+          <Text style={styles.value}>{remainingCount}</Text>
+          <View style={styles.metricMeta}>
+            <Text style={styles.unit}>{t('dashboard.remaining')}</Text>
+            <Text style={styles.total}>{t('dashboard.totalAppointments', { n: totalCount })}</Text>
+          </View>
         </View>
 
         <View style={styles.divider} />
@@ -72,6 +87,8 @@ export default function TodayHeroCard({ count, next, onPressViewAll, onPressNext
           <Pressable
             onPress={handleNext}
             style={({ pressed }) => [styles.nextRow, pressed && { opacity: 0.85 }]}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('dashboard.next')}: ${next.patient_name}, ${formatTime(next.start_time)}`}
           >
             <PatientAvatar name={next.patient_name} size={30} />
             <View style={styles.nextText}>
@@ -88,7 +105,7 @@ export default function TodayHeroCard({ count, next, onPressViewAll, onPressNext
           <Text style={styles.empty}>{t('dashboard.noUpcoming')}</Text>
         )}
       </LinearGradient>
-    </Pressable>
+    </View>
   )
 }
 
@@ -139,10 +156,11 @@ function makeStyles(c: Colors) {
   },
   metricBlock: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     gap: 8,
     marginBottom: 12,
   },
+  metricMeta: { gap: 1 },
   value: {
     fontFamily: font('800'),
     fontSize: 40,
@@ -156,6 +174,12 @@ function makeStyles(c: Colors) {
     fontSize: 14,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.85)',
+  },
+  total: {
+    fontFamily: font('500'),
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.68)',
   },
   divider: {
     height: StyleSheet.hairlineWidth,

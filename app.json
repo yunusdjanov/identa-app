@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/brand/identa-icon.png",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "scheme": "identa",
     "newArchEnabled": true,
     "splash": {
@@ -16,17 +16,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "uz.identa.mobile",
-      "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Identa uses the camera to capture patient and treatment photos for the clinical record.",
         "NSPhotoLibraryUsageDescription": "Identa accesses your photo library to attach existing patient or treatment images to the clinical record.",
-        "NSPhotoLibraryAddUsageDescription": "Identa saves treatment photos you export to your photo library.",
-        "NSFaceIDUsageDescription": "Identa uses Face ID to unlock the app and protect patient data.",
-        "NSUserNotificationUsageDescription": "Identa sends reminders for upcoming appointments and clinic activity.",
-        "UIBackgroundModes": [
-          "remote-notification"
-        ]
+        "NSPhotoLibraryAddUsageDescription": "Identa saves treatment photos you export to your photo library."
       },
       "associatedDomains": [
         "applinks:identa.uz",
@@ -35,7 +29,6 @@
     },
     "android": {
       "package": "uz.identa.mobile",
-      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/brand/identa-icon.png",
         "backgroundColor": "#F0FAF8"
@@ -44,12 +37,6 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "READ_MEDIA_IMAGES",
-        "POST_NOTIFICATIONS",
-        "USE_BIOMETRIC",
-        "USE_FINGERPRINT",
         "VIBRATE",
         "INTERNET",
         "ACCESS_NETWORK_STATE"
@@ -91,21 +78,16 @@
           "photosPermission": "Identa accesses your photo library to attach existing patient or treatment images to the clinical record.",
           "cameraPermission": "Identa uses the camera to capture patient and treatment photos for the clinical record."
         }
-      ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/brand/identa-icon.png",
-          "color": "#0F766E",
-          "sounds": []
-        }
       ]
     ],
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "extra": {
-      "eas": {}
-    }
+      "eas": {
+        "projectId": "82c67781-807d-4d28-a525-2a642ef29694"
+      }
+    },
+    "owner": "userdevx"
   }
 }

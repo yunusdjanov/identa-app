@@ -1,8 +1,10 @@
 import { create } from 'zustand'
-import { Appearance, type ColorSchemeName } from 'react-native'
-import AsyncStorage from '@react-native-async-storage/async-storage'
+import type { ColorSchemeName } from 'react-native'
 
-const STORAGE_KEY = '@identa/theme_mode'
+// Dark mode is intentionally paused for the current release. Keep the small
+// store contract consumed by screens while every active path resolves to
+// light and no appearance listener or persisted preference is loaded.
+export const DARK_MODE_ENABLED: boolean = false
 
 export type ThemeMode = 'light' | 'dark' | 'auto'
 export type EffectiveScheme = 'light' | 'dark'
@@ -19,43 +21,17 @@ interface ThemeState {
   _syncFromSystem: (system: ColorSchemeName) => void
 }
 
-function resolveEffective(mode: ThemeMode, system: ColorSchemeName): EffectiveScheme {
-  if (mode === 'auto') return system === 'dark' ? 'dark' : 'light'
-  return mode
-}
-
-export const useThemeStore = create<ThemeState>((set, get) => ({
-  mode: 'auto',
-  effective: Appearance.getColorScheme() === 'dark' ? 'dark' : 'light',
+export const useThemeStore = create<ThemeState>((set) => ({
+  mode: 'light',
+  effective: 'light',
   isHydrating: true,
   hydrate: async () => {
-    try {
-      const stored = (await AsyncStorage.getItem(STORAGE_KEY)) as ThemeMode | null
-      const mode: ThemeMode =
-        stored === 'light' || stored === 'dark' || stored === 'auto' ? stored : 'auto'
-      const system = Appearance.getColorScheme()
-      set({ mode, effective: resolveEffective(mode, system), isHydrating: false })
-    } catch {
-      set({ isHydrating: false })
-    }
+    set({ mode: 'light', effective: 'light', isHydrating: false })
   },
-  setMode: async (mode) => {
-    const system = Appearance.getColorScheme()
-    set({ mode, effective: resolveEffective(mode, system) })
-    try {
-      await AsyncStorage.setItem(STORAGE_KEY, mode)
-    } catch {
-      // Ignore persist errors — user will just see a re-prompt next launch.
-    }
+  setMode: async (_mode) => {
+    set({ mode: 'light', effective: 'light' })
   },
-  _syncFromSystem: (system) => {
-    const { mode } = get()
-    if (mode !== 'auto') return
-    set({ effective: resolveEffective(mode, system) })
+  _syncFromSystem: (_system) => {
+    set({ mode: 'light', effective: 'light' })
   },
 }))
-
-// Subscribe to OS appearance changes so 'auto' mode tracks system changes.
-Appearance.addChangeListener(({ colorScheme }) => {
-  useThemeStore.getState()._syncFromSystem(colorScheme)
-})

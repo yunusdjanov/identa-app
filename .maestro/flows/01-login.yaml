@@ -14,4 +14,5 @@ tags:
 # Persistence sanity: after login the Patients tab should be in the bottom
 # nav — confirms the Navigation tree post-auth is intact.
 - assertVisible: "Bemorlar"
-- assertVisible: "Navbatlar"
+- assertVisible: "Analitika"
+- assertVisible: "To'lovlar"

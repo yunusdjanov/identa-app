@@ -22,16 +22,11 @@ tags:
 # - the upcoming-appointments section title
 # - either the empty state OR at least one appointment row's status pill
 - assertVisible: "Bosh sahifa"
+- assertVisible: "Haftalik reja"
 
 # The upcoming section's title is one of these depending on locale.
 # Maestro doesn't support regex in `visible`, so we accept any of them
 # via a runFlow OR cascade.
-- runFlow:
-    when:
-      visible: "Yaqinlashayotgan navbatlar"
-    commands:
-      - assertVisible: "Yaqinlashayotgan navbatlar"
-
 # Pull-to-refresh exercises the dashboard query. We don't assert the
 # result; we just need it to not crash.
 - swipe:

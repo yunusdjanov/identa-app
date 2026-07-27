@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { API_URL } from '../constants'
+import { getCurrentLocale } from '../lib/currentLocale'
 
 // Why this file exists:
 // The Laravel backend's auth routes — login, register, forgot-password,
@@ -89,7 +90,7 @@ async function fetchCsrf(): Promise<CsrfHandshake> {
   //     auto-attach it on the next same-origin request, even if we never
   //     see the value in JS-land.
   const response = await axios.get(`${API_URL}/auth/csrf-token`, {
-    headers: { Accept: 'application/json' },
+    headers: { Accept: 'application/json', 'Accept-Language': getCurrentLocale() },
     timeout: 20_000,
     withCredentials: true,
   })

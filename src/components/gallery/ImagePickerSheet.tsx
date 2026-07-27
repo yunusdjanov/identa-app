@@ -128,12 +128,23 @@ export default function ImagePickerSheet({
         {/* Stop the press from bubbling into the backdrop dismiss when the
             user taps a button inside the sheet. */}
         <Pressable style={styles.sheetWrap} onPress={(e) => e.stopPropagation()}>
-          <SafeAreaView edges={['bottom']} style={styles.sheet}>
+          <SafeAreaView
+            edges={['bottom']}
+            style={styles.sheet}
+            accessibilityViewIsModal
+          >
             <View style={styles.handle} />
-            <Text style={styles.title}>{t('gallery.pickerTitle')}</Text>
+            <Text accessibilityRole="header" style={styles.title}>
+              {t('gallery.pickerTitle')}
+            </Text>
 
             {allowCamera ? (
-              <Pressable style={styles.row} onPress={handleCamera}>
+              <Pressable
+                style={styles.row}
+                onPress={handleCamera}
+                accessibilityRole="button"
+                accessibilityLabel={t('gallery.useCamera')}
+              >
                 <View style={styles.iconBubble}>
                   <Icon name="camera-outline" size={22} color={c.brand as string} />
                 </View>
@@ -144,7 +155,12 @@ export default function ImagePickerSheet({
               </Pressable>
             ) : null}
 
-            <Pressable style={styles.row} onPress={handleLibrary}>
+            <Pressable
+              style={styles.row}
+              onPress={handleLibrary}
+              accessibilityRole="button"
+              accessibilityLabel={t('gallery.useLibrary')}
+            >
               <View style={styles.iconBubble}>
                 <Icon name="images-outline" size={22} color={c.brand as string} />
               </View>
@@ -154,7 +170,12 @@ export default function ImagePickerSheet({
               </View>
             </Pressable>
 
-            <Pressable style={styles.cancelBtn} onPress={onClose}>
+            <Pressable
+              style={styles.cancelBtn}
+              onPress={onClose}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.cancel')}
+            >
               <Text style={styles.cancelText}>{t('common.cancel')}</Text>
             </Pressable>
           </SafeAreaView>

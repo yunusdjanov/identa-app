@@ -116,16 +116,31 @@ export default function MonthCalendarPicker({
   const weekdayLabels = useMemo(() => buildWeekdayLabels(locale), [locale])
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={title ?? t('common.pickDate')}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={title ?? t('common.pickDate')}
+      closeAccessibilityLabel={t('common.close')}
+    >
       {/* Month nav */}
       <View style={styles.monthRow}>
-        <Pressable onPress={goPrevMonth} hitSlop={8} style={styles.monthBtn}>
+        <Pressable
+          onPress={goPrevMonth}
+          style={styles.monthBtn}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.previousMonth')}
+        >
           <Icon name="chevron-back" size={20} color={c.brand as string} />
         </Pressable>
         <Text style={styles.monthLabel}>
           {formatMonthYear(viewMonth, locale)}
         </Text>
-        <Pressable onPress={goNextMonth} hitSlop={8} style={styles.monthBtn}>
+        <Pressable
+          onPress={goNextMonth}
+          style={styles.monthBtn}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.nextMonth')}
+        >
           <Icon name="chevron-forward" size={20} color={c.brand as string} />
         </Pressable>
       </View>
@@ -250,8 +265,8 @@ function makeStyles(c: Colors) {
       paddingBottom: spacing.sm,
     },
     monthBtn: {
-      width: 36,
-      height: 36,
+      width: 44,
+      height: 44,
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: radius.lg,

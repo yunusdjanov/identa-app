@@ -73,7 +73,7 @@ export default function Button({
       ) : (
         <>
           {leftIcon}
-          <Text style={[v.text, s.text, textStyle]}>{title}</Text>
+          <Text style={[v.text, s.text, styles.label, textStyle]}>{title}</Text>
           {rightIcon}
         </>
       )}
@@ -94,6 +94,9 @@ export default function Button({
         onPressIn={onPressIn}
         onPressOut={onPressOut}
         disabled={isDisabled}
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        accessibilityState={{ disabled: isDisabled, busy: loading }}
       >
         {showGradient ? (
           <LinearGradient
@@ -159,17 +162,17 @@ function getSizeStyle(size: Size) {
   switch (size) {
     case 'sm':
       return {
-        container: { height: 36, paddingHorizontal: 14, borderRadius: radius.md },
+        container: { minHeight: 36, paddingHorizontal: 14, paddingVertical: 6, borderRadius: radius.md },
         text: typography.subheadBold,
       }
     case 'md':
       return {
-        container: { height: 44, paddingHorizontal: 18, borderRadius: radius.lg },
+        container: { minHeight: 44, paddingHorizontal: 18, paddingVertical: 9, borderRadius: radius.lg },
         text: typography.bodyEmphasized,
       }
     case 'lg':
       return {
-        container: { height: 54, paddingHorizontal: 22, borderRadius: radius.xl },
+        container: { minHeight: 54, paddingHorizontal: 22, paddingVertical: 14, borderRadius: radius.xl },
         text: { ...typography.bodyEmphasized, fontFamily: font('700'), fontSize: 17, fontWeight: '700' as const },
       }
   }
@@ -182,6 +185,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     overflow: 'hidden',
+  },
+  label: {
+    flexShrink: 1,
+    textAlign: 'center',
   },
   fullWidth: { width: '100%' },
 })

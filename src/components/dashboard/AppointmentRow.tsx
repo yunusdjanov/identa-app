@@ -13,10 +13,11 @@ import type { DashboardAppointmentView } from '../../types'
 interface Props {
   appointment: DashboardAppointmentView
   highlightUpcoming?: boolean
+  overdue?: boolean
   onPress?: () => void
 }
 
-export default function AppointmentRow({ appointment, highlightUpcoming, onPress }: Props) {
+export default function AppointmentRow({ appointment, highlightUpcoming, overdue, onPress }: Props) {
   const { t } = useI18n()
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
@@ -29,7 +30,16 @@ export default function AppointmentRow({ appointment, highlightUpcoming, onPress
     }
   }
 
-  const relativeChip = highlightUpcoming ? renderRelativeChip(appointment.start_time, t, c, styles) : null
+  const relativeChip = overdue
+    ? (
+        <View style={[styles.chip, styles.chipOverdue]}>
+          <View style={[styles.chipDot, { backgroundColor: c.danger }]} />
+          <Text style={[styles.chipText, { color: c.danger }]}>{t('dashboard.overdue')}</Text>
+        </View>
+      )
+    : highlightUpcoming
+      ? renderRelativeChip(appointment.start_time, t, c, styles)
+      : null
 
   const Inner = (
     <View style={styles.row}>
@@ -63,6 +73,8 @@ export default function AppointmentRow({ appointment, highlightUpcoming, onPress
       <Pressable
         onPress={handlePress}
         style={({ pressed }) => pressed && styles.pressed}
+        accessibilityRole="button"
+        accessibilityLabel={`${appointment.patient_name}, ${reason}, ${formatTime(appointment.start_time)}, ${t('dashboard.duration', { n: appointment.duration_minutes })}`}
       >
         {Inner}
       </Pressable>
@@ -138,6 +150,9 @@ function makeStyles(c: Colors) {
   },
   chipNeutral: {
     backgroundColor: c.fillQuaternary,
+  },
+  chipOverdue: {
+    backgroundColor: 'rgba(255,59,48,0.10)',
   },
   chipDot: {
     width: 5,
