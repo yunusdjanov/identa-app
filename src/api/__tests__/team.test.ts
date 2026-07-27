@@ -8,10 +8,14 @@ import MockAdapter from 'axios-mock-adapter'
 import client from '../client'
 import {
   createAssistant,
+  deleteAssistant,
+  listAssistants,
   resetAssistantPassword,
+  updateAssistant,
   updateAssistantStatus,
 } from '../team'
 import { useAuthStore } from '../../stores/auth'
+import { useNetworkStore } from '../../stores/network'
 import type { ApiAssistant } from '../../types'
 
 function authed() {
@@ -43,8 +47,28 @@ describe('team mutations', () => {
   beforeEach(() => {
     mock = new MockAdapter(client)
     authed()
+    useNetworkStore.setState({ isOnline: true })
   })
-  afterEach(() => mock.restore())
+  afterEach(() => {
+    mock.restore()
+    useNetworkStore.setState({ isOnline: true })
+  })
+
+  it('listAssistants sends canonical pagination parameters', async () => {
+    let params: Record<string, number> | undefined
+    mock.onGet('/team/assistants').reply((config) => {
+      params = config.params
+      return [200, {
+        data: [sample],
+        meta: { pagination: { page: 2, total_pages: 3, per_page: 25, total: 60 } },
+      }]
+    })
+
+    const response = await listAssistants(2, 25)
+
+    expect(params).toEqual({ page: 2, per_page: 25 })
+    expect(response.meta.pagination.total_pages).toBe(3)
+  })
 
   it('createAssistant sends password_confirmation matching the password', async () => {
     let body: any
@@ -91,5 +115,42 @@ describe('team mutations', () => {
     expect(url).toBe('/team/assistants/as-1/status')
     expect(body.status).toBe('blocked')
     expect(r.account_status).toBe('blocked')
+  })
+
+  it('sends null when an existing assistant phone is cleared', async () => {
+    let body: any
+    mock.onPut('/team/assistants/as-1').reply((config) => {
+      body = JSON.parse(config.data)
+      return [200, { data: { ...sample, phone: null } }]
+    })
+
+    await updateAssistant('as-1', {
+      name: 'Madina',
+      email: 'madina@x',
+      phone: null,
+      permissions: ['patients.view'],
+    })
+
+    expect(body.phone).toBeNull()
+  })
+
+  it('blocks every team mutation while offline', async () => {
+    useNetworkStore.setState({ isOnline: false })
+    const payload = {
+      name: 'Madina',
+      email: 'madina@x',
+      password: 'secret12',
+      permissions: ['patients.view'],
+    }
+
+    await expect(createAssistant(payload)).rejects.toMatchObject({ isOfflineError: true })
+    await expect(updateAssistant('as-1', payload)).rejects.toMatchObject({ isOfflineError: true })
+    await expect(updateAssistantStatus('as-1', 'blocked')).rejects.toMatchObject({ isOfflineError: true })
+    await expect(resetAssistantPassword('as-1', 'newpass12')).rejects.toMatchObject({ isOfflineError: true })
+    await expect(deleteAssistant('as-1')).rejects.toMatchObject({ isOfflineError: true })
+    expect(mock.history.post).toHaveLength(0)
+    expect(mock.history.put).toHaveLength(0)
+    expect(mock.history.patch).toHaveLength(0)
+    expect(mock.history.delete).toHaveLength(0)
   })
 })

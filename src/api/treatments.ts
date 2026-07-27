@@ -1,6 +1,6 @@
 import client from './client'
 import { requireOnline } from '../lib/offlineGuard'
-import { recordQuickPayment, type QuickPaymentPayload } from './payments'
+import { shouldUseMockApi } from '../lib/mockApi'
 import type {
   ApiTreatment,
   ApiTreatmentImage,
@@ -10,18 +10,11 @@ import type {
 } from '../types'
 
 // Per-resource override. Flip via `EXPO_PUBLIC_MOCK_TREATMENTS=false`.
-//
-// Payments:
-//   `recordPayment` now goes through the live "quick payment" endpoint
-//   (POST /patients/{id}/quick-payments) — see src/api/payments.ts. The
-//   backend synthesizes an Invoice + Payment atomically so the mobile UI
-//   doesn't need to model Invoices separately. When `treatment_id` is
-//   passed, the backend also mirrors the amount onto the treatment row's
-//   paid_amount, so calling-side React Query just needs to invalidate
-//   the 'treatments' key to see updated balances.
 const USE_MOCK =
-  process.env.EXPO_PUBLIC_MOCK_TREATMENTS !== 'false' &&
-  process.env.EXPO_PUBLIC_USE_MOCK_API !== 'false'
+  shouldUseMockApi(
+    process.env.EXPO_PUBLIC_MOCK_TREATMENTS,
+    process.env.EXPO_PUBLIC_USE_MOCK_API
+  )
 
 function mockDelay<T>(value: T, ms = 400): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms))
@@ -151,99 +144,6 @@ interface ListParams {
   per_page?: number
 }
 
-// Caller-side shape for recording a payment against a specific
-// treatment. `patient_id` is required so we can hit the patient-scoped
-// quick-payments endpoint. `description` defaults to the treatment_type
-// on the caller side for nicer invoice labels in reports.
-export interface RecordPaymentInput {
-  patient_id: string
-  treatment_id: string
-  amount: number
-  payment_method: QuickPaymentPayload['payment_method']
-  payment_date: string  // YYYY-MM-DD
-  description?: string
-  notes?: string
-}
-
-export const recordPayment = async (input: RecordPaymentInput): Promise<ApiTreatment> => {
-  requireOnline()
-  if (USE_MOCK) {
-    if (input.amount <= 0) throw new Error('Invalid amount')
-    const idx = MOCK_CACHE.findIndex((t) => t.id === input.treatment_id)
-    if (idx < 0) throw new Error('Treatment not found')
-    const tr = MOCK_CACHE[idx]!
-    // Cap at the remaining balance to mirror the real backend, which rejects
-    // a treatment-linked quick-payment that exceeds the balance
-    // (QuickPaymentService → amount_exceeds_balance).
-    const applied = Math.min(tr.balance, input.amount)
-    const newPaid = tr.paid_amount + applied
-    const newPayment: ApiTreatmentPayment = {
-      id: `pay-${input.treatment_id}-${Date.now()}`,
-      amount: applied,
-      recorded_at: new Date().toISOString(),
-    }
-    const updated: ApiTreatment = {
-      ...tr,
-      paid_amount: newPaid,
-      balance: tr.debt_amount - newPaid,
-      payments: [...(tr.payments ?? []), newPayment],
-    }
-    MOCK_CACHE = MOCK_CACHE.map((t, i) => (i === idx ? updated : t))
-    return mockDelay(updated, 400)
-  }
-  // Backend's PaymentResource doesn't echo back the updated treatment,
-  // so we optimistically construct the next-state Treatment locally and
-  // return it. React Query consumers should still invalidate ['treatments']
-  // to pick up authoritative state on the next render.
-  const payment = await recordQuickPayment(input.patient_id, {
-    amount: input.amount,
-    payment_method: input.payment_method,
-    payment_date: input.payment_date,
-    description: input.description,
-    treatment_id: input.treatment_id,
-    notes: input.notes,
-  })
-  const cached = MOCK_CACHE.find((t) => t.id === input.treatment_id)
-  if (cached) {
-    const newPaid = cached.paid_amount + input.amount
-    return {
-      ...cached,
-      paid_amount: newPaid,
-      balance: cached.debt_amount - newPaid,
-      payments: [
-        ...(cached.payments ?? []),
-        {
-          id: payment.id,
-          amount: payment.amount,
-          recorded_at: payment.created_at,
-        },
-      ],
-    }
-  }
-  // Cold path: we don't have the prior treatment cached (rare — would
-  // only happen if a user paid against a treatment that was never
-  // listed). Return a minimal stub; React Query refetch fills in the rest.
-  return {
-    id: input.treatment_id,
-    patient_id: input.patient_id,
-    teeth: [],
-    treatment_type: input.description ?? '',
-    treatment_date: input.payment_date,
-    cost: input.amount,
-    debt_amount: input.amount,
-    paid_amount: input.amount,
-    balance: 0,
-    images: [],
-    payments: [
-      {
-        id: payment.id,
-        amount: payment.amount,
-        recorded_at: payment.created_at,
-      },
-    ],
-  }
-}
-
 export const listTreatments = async (params?: ListParams): Promise<ApiListResponse<ApiTreatment>> => {
   if (USE_MOCK) {
     let data = MOCK_CACHE
@@ -275,6 +175,37 @@ export const listTreatments = async (params?: ListParams): Promise<ApiListRespon
   const response = await client.get<ApiListResponse<ApiTreatment>>('/treatments', {
     params: realParams,
   })
+  return {
+    ...response.data,
+    data: response.data.data.map(normalizeTreatmentFromApi),
+  }
+}
+
+/**
+ * Patient-record history uses the patient-scoped endpoint. Unlike the global
+ * finance ledger endpoint, this route is authorized by patients.view and
+ * masks financial fields server-side when payments.view is absent.
+ */
+export const listPatientTreatments = async (
+  patientId: string,
+  params?: Pick<ListParams, 'page' | 'per_page'>
+): Promise<ApiListResponse<ApiTreatment>> => {
+  if (USE_MOCK) {
+    return listTreatments({ patient_id: patientId, ...params })
+  }
+
+  const response = await client.get<ApiListResponse<ApiTreatment>>(
+    `/patients/${patientId}/treatments`,
+    {
+      params: {
+        page: params?.page,
+        per_page: params?.per_page,
+        sort: '-treatment_date,-created_at',
+        include_images: 1,
+      },
+    }
+  )
+
   return {
     ...response.data,
     data: response.data.data.map(normalizeTreatmentFromApi),
@@ -331,6 +262,7 @@ export interface TreatmentPayload {
   description?: string | null
   debt_amount?: number
   paid_amount?: number
+  currency?: 'UZS' | 'USD'
 }
 
 export async function getPatientTreatment(

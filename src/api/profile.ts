@@ -1,9 +1,12 @@
 import client from './client'
+import { shouldUseMockApi } from '../lib/mockApi'
 
-// Per-resource override. Flip via `EXPO_PUBLIC_MOCK_PROFILE=false`.
+// Production-safe default: mock profile data must be explicitly enabled.
 const USE_MOCK =
-  process.env.EXPO_PUBLIC_MOCK_PROFILE !== 'false' &&
-  process.env.EXPO_PUBLIC_USE_MOCK_API !== 'false'
+  shouldUseMockApi(
+    process.env.EXPO_PUBLIC_MOCK_PROFILE,
+    process.env.EXPO_PUBLIC_USE_MOCK_API
+  )
 
 function mockDelay<T>(value: T, ms = 500): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms))

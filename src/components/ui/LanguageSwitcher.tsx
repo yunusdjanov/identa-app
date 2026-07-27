@@ -27,7 +27,7 @@ interface Props {
 }
 
 export default function LanguageSwitcher({ variant = 'chip' }: Props) {
-  const { locale, setLocale } = useI18n()
+  const { locale, setLocale, t } = useI18n()
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const [open, setOpen] = useState(false)
@@ -63,7 +63,13 @@ export default function LanguageSwitcher({ variant = 'chip' }: Props) {
 
   return (
     <>
-      <Pressable onPress={openMenu} style={styles.trigger} hitSlop={8}>
+      <Pressable
+        onPress={openMenu}
+        style={[styles.trigger, variant === 'minimal' && styles.triggerMinimal]}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={t('settings.languageSheet.title')}
+      >
         <Icon name="globe-outline" size={16} color={c.labelSecondary as string} />
         <Text style={styles.triggerText}>{LABELS[locale].short}</Text>
       </Pressable>
@@ -81,7 +87,7 @@ export default function LanguageSwitcher({ variant = 'chip' }: Props) {
           ]}
         >
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Language</Text>
+          <Text style={styles.sheetTitle}>{t('settings.languageSheet.title')}</Text>
           {SUPPORTED_LOCALES.map((l) => {
             const isActive = locale === l
             return (
@@ -126,6 +132,13 @@ function makeStyles(c: Colors) {
     ...typography.footnoteBold,
     color: c.label,
     letterSpacing: 0.4,
+  },
+  triggerMinimal: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: c.background,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: c.separator,
   },
   overlay: {
     flex: 1,

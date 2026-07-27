@@ -15,53 +15,53 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useMutation } from '@tanstack/react-query'
 import { useNavigation } from '@react-navigation/native'
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import * as Haptics from 'expo-haptics'
 
 import Button from '../../components/ui/Button'
 import InputCard from '../../components/ui/InputCard'
 import Icon from '../../components/ui/Icon'
+import LanguageSwitcher from '../../components/ui/LanguageSwitcher'
 import { useToast } from '../../components/ui/Toast'
 
 import { spacing, typography, radius } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import { useI18n } from '../../i18n'
 import { requestPasswordReset } from '../../api/auth'
+import { getAuthErrorMessage } from '../../lib/authErrorMessage'
+import { INPUT_LIMITS, validateEmail } from '../../lib/validation'
+import type { AuthStackParams } from '../../navigation'
+
+type Nav = NativeStackNavigationProp<AuthStackParams>
 
 export default function ForgotPasswordScreen() {
   const { t } = useI18n()
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
-  const navigation = useNavigation()
+  const navigation = useNavigation<Nav>()
   const toast = useToast()
   const [email, setEmail] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [sent, setSent] = useState(false)
 
-  const emailError = submitted
-    ? validateEmail(email, {
-        required: t('login.errors.emailRequired'),
-        invalid: t('login.errors.emailInvalid'),
-      })
-    : null
+  const emailErrorKey = submitted ? validateEmail(email, { required: true }) : null
+  const emailError = emailErrorKey ? t(`login.errors.${emailErrorKey}`) : null
 
   const mutation = useMutation({
     mutationFn: () => requestPasswordReset(email.trim()),
     onSuccess: () => {
+      setSent(true)
       toast.success(t('forgotPassword.success'))
-      setTimeout(() => navigation.goBack(), 800)
     },
-    onError: () => {
-      toast.error(t('forgotPassword.failed'))
+    onError: (error) => {
+      toast.error(getAuthErrorMessage(error, t, 'forgotPassword.failed'))
     },
   })
 
   const handleSubmit = () => {
     Keyboard.dismiss()
     setSubmitted(true)
-    const eErr = validateEmail(email, {
-      required: t('login.errors.emailRequired'),
-      invalid: t('login.errors.emailInvalid'),
-    })
-    if (eErr) {
+    if (validateEmail(email, { required: true })) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
       return
     }
@@ -85,11 +85,17 @@ export default function ForgotPasswordScreen() {
         <StatusBar barStyle="dark-content" />
 
         <View style={styles.navBar}>
-          <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
+          <Pressable
+            onPress={onBack}
+            hitSlop={12}
+            style={styles.backBtn}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.back')}
+          >
             <Icon name="chevron-back" size={26} color={c.brand as string} />
             <Text style={styles.backText}>{t('common.back')}</Text>
           </Pressable>
-          <View />
+          <LanguageSwitcher variant="minimal" />
         </View>
 
         <KeyboardAvoidingView
@@ -115,7 +121,11 @@ export default function ForgotPasswordScreen() {
                   iconName="mail-outline"
                   placeholder={t('login.emailPlaceholder')}
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(value) => {
+                    setEmail(value)
+                    setSent(false)
+                  }}
+                  accessibilityLabel={t('login.email')}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoComplete="email"
@@ -123,11 +133,26 @@ export default function ForgotPasswordScreen() {
                   textContentType="emailAddress"
                   returnKeyType="done"
                   onSubmitEditing={handleSubmit}
-                  maxLength={255}
+                  maxLength={INPUT_LIMITS.email}
                   error={Boolean(emailError)}
+                  errorMessage={emailError}
                 />
 
-                {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
+                {emailError ? (
+                  <Text style={styles.errorText} accessibilityRole="alert">
+                    {emailError}
+                  </Text>
+                ) : null}
+
+                {sent ? (
+                  <View style={styles.sentCard} accessibilityRole="alert">
+                    <Icon name="checkmark-circle" size={22} color={c.success as string} />
+                    <View style={styles.sentCopy}>
+                      <Text style={styles.sentTitle}>{t('forgotPassword.success')}</Text>
+                      <Text style={styles.sentHelp}>{t('forgotPassword.sentHelp')}</Text>
+                    </View>
+                  </View>
+                ) : null}
 
                 <Button
                   title={mutation.isPending ? t('forgotPassword.submitting') : t('forgotPassword.submit')}
@@ -144,14 +169,6 @@ export default function ForgotPasswordScreen() {
       </SafeAreaView>
     </View>
   )
-}
-
-function validateEmail(value: string, messages: { required: string; invalid: string }): string | null {
-  const v = value.trim()
-  if (!v) return messages.required
-  const pattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  if (!pattern.test(v)) return messages.invalid
-  return null
 }
 
 function makeStyles(c: Colors) {
@@ -212,5 +229,16 @@ function makeStyles(c: Colors) {
       marginLeft: spacing.lg,
       marginTop: -spacing.xs,
     },
+    sentCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: spacing.sm,
+      padding: spacing.md,
+      borderRadius: radius.lg,
+      backgroundColor: c.brandLight,
+    },
+    sentCopy: { flex: 1, gap: spacing.xs },
+    sentTitle: { ...typography.footnoteBold, color: c.success },
+    sentHelp: { ...typography.footnote, color: c.labelSecondary },
   })
 }

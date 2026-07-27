@@ -9,20 +9,32 @@ import {
   StyleProp,
 } from 'react-native'
 import Icon, { IconName } from './Icon'
-import { radius, typography } from '../../constants/theme'
+import { font, inputMetrics, radius } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 
 interface Props extends TextInputProps {
   iconName?: IconName
   rightAccessory?: React.ReactNode
   error?: boolean
+  errorMessage?: string | null
   containerStyle?: StyleProp<ViewStyle>
 }
 
 // Premium "floating card" input: each input is its own rounded elevated box.
 // Focused state animates a soft border + shadow ring in brand color.
 const InputCard = forwardRef<TextInput, Props>(function InputCard(
-  { iconName, rightAccessory, error, containerStyle, style, onFocus, onBlur, ...rest },
+  {
+    iconName,
+    rightAccessory,
+    error,
+    errorMessage,
+    containerStyle,
+    style,
+    onFocus,
+    onBlur,
+    accessibilityHint,
+    ...rest
+  },
   ref
 ) {
   const c = useColors()
@@ -66,7 +78,7 @@ const InputCard = forwardRef<TextInput, Props>(function InputCard(
         <View style={styles.iconWrap}>
           <Icon
             name={iconName}
-            size={20}
+            size={inputMetrics.iconSize}
             color={focused ? (c.brand as string) : (c.labelSecondary as string)}
           />
         </View>
@@ -84,7 +96,10 @@ const InputCard = forwardRef<TextInput, Props>(function InputCard(
           setFocused(false)
           onBlur?.(e)
         }}
+        accessibilityHint={errorMessage ?? accessibilityHint}
+        aria-invalid={Boolean(error)}
         {...rest}
+        accessibilityLabel={rest.accessibilityLabel ?? rest.placeholder}
       />
 
       {rightAccessory ? <View style={styles.rightWrap}>{rightAccessory}</View> : null}
@@ -99,26 +114,28 @@ function makeStyles(c: Colors) {
     card: {
       flexDirection: 'row',
       alignItems: 'center',
-      minHeight: 56,
+      minHeight: inputMetrics.height,
       backgroundColor: c.background,
-      borderRadius: radius.xl,
+      borderRadius: radius.lg,
       borderWidth: 1.2,
-      paddingHorizontal: 16,
+      paddingHorizontal: inputMetrics.paddingHorizontal,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 6 },
     },
     iconWrap: {
-      width: 24,
-      height: 24,
-      marginRight: 12,
+      width: inputMetrics.iconBoxSize,
+      height: inputMetrics.iconBoxSize,
+      marginRight: inputMetrics.contentGap,
       alignItems: 'center',
       justifyContent: 'center',
     },
     input: {
       flex: 1,
-      ...typography.body,
+      fontFamily: font('400'),
+      fontSize: inputMetrics.fontSize,
+      lineHeight: inputMetrics.lineHeight,
       color: c.label,
-      paddingVertical: 18,
+      paddingVertical: 10,
     },
     rightWrap: { marginLeft: 8 },
   })

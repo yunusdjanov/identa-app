@@ -8,7 +8,7 @@
 > payments sort tiebreak, DOB max.
 > **Still remaining:** BIG → Analytics screen · billing checkout · Google sign-in
 > (still a stub) + Connected Accounts (absent) · Staff audit-logs tab · PDF export.
-> Backend-blocked (still `USE_MOCK=true`): notification prefs · active sessions ·
+> Product-paused: notification prefs/push. Backend-blocked: active sessions ·
 > push-device registration. Small → reason/notes `|` encoding · 1-year inactive
 > filter · phone normalization (web change) · currency format (device-verify).
 > Quality → EAS projectId · synthetic sparkline · deep-link host · dark mode.
@@ -37,7 +37,7 @@
 | BIG-1 | **Analytics screen** | Web has full `/analytics` (KPIs + 4 charts + date ranges). **Mobile has NONE.** | Decide: build a mobile Analytics screen (M–L, charts on RN), or skip (dashboard already shows key KPIs). |
 | BIG-2 | **In-app billing / checkout** | Web: plan cards, monthly/yearly, checkout→PayX, downgrade dialog, payment history. **Mobile: view-only, upgrade is a stub.** | **[BE]** Recommend: add mobile checkout (PayX via WebView/redirect) + payment history. High user value. |
 | BIG-3 | **Google sign-in + Connected Accounts** | Web: Google login + Settings→Connected Accounts (link/unlink, lock-out guard). **Mobile: Google is a stub; no Connected Accounts.** | **[BE-ready]** Backend endpoints exist (`/auth/google`, `/auth/google/link`). Recommend bringing both to mobile. |
-| BIG-4 | **Payment model divergence** | Web: money is just `paid_amount`/`debt_amount` on a treatment — **no payment method, no "record payment" action.** Mobile: has a **cash/card/bank_transfer** record-payment flow (quick-payments) + delete. | **Decision required:** which is the source of truth? Either (a) add payment methods to web, or (b) simplify mobile to match web. Affects "1:1". |
+| BIG-4 | **Payment model divergence** | **Closed:** mobile now follows the web/backend treatment ledger (`debt_amount`, `paid_amount`, currency). Obsolete quick-payment and invoice client flows were removed. | No product decision remains. |
 | BIG-5 | **Action Logs (audit) on Staff** | Web `/staff` has an **Action Logs** tab (audit trail, filters, masked IP). Mobile staff = CRUD only, **no audit tab.** | Recommend: add a read-only Action Logs tab to mobile staff (M, **[BE]** if no mobile audit endpoint). |
 | BIG-6 | **Admin panel** | Web has a full `/admin/*` suite. Mobile has none. | Recommend **❌ exclude** — admins use the web; out of mobile scope. Confirm. |
 | BIG-7 | **PDF export** | Web exports PDF on patients/treatments/appointments/payments/analytics/billing (when `can_export`). Mobile: **no export.** | Decide: add share/export on mobile (M) or skip for v1. |
@@ -91,11 +91,6 @@
 | Appointments card + schedule CTA | ✓ | ✓ | = |
 | Edit / archive / restore / force-delete | ✓ | ✓ | = |
 
-### Odontogram
-| Item | Web | Mobile | Status |
-|---|---|---|---|
-| 32-tooth chart, treatment-count highlight, read-only tooth detail | ✓ | ✓ | **= (both view-only, same model)** |
-
 ### Treatments
 | Item | Web | Mobile | Status | Note |
 |---|---|---|---|---|
@@ -119,8 +114,8 @@
 |---|---|---|---|
 | Summary totals, Patients + History tabs, search | ✓ | ✓ | = |
 | 4 summary cards | ✓ | totals | Δ (minor) |
-| Recording happens in treatment flow; **no invoices** | ✓ | ✓ | = (both no invoices) |
-| Export PDF | ✓ | ✗ | ＋web → BIG-7 |
+| Treatment ledger (`debt_amount`, `paid_amount`, currency); **no invoices** | ✓ | ✓ | = |
+| Filtered payment/expense and patient-ledger PDF export | ✓ | ✓ | = |
 
 ### Billing
 | Item | Web | Mobile | Status |
@@ -139,16 +134,16 @@
 | Password change | ✓ | ✓ | = | |
 | **Connected Accounts (Google)** | ✓ | ✗ | ＋web → BIG-3 |
 | Language | in app layout | in settings | Δ | Mobile: **persist locale** (resets to ru — bug) |
-| Theme (light/dark/auto) | ✗ | ✓ | ＋mob | Keep; finish dark-mode rollout |
-| Notifications prefs | ✗ | ✓ (**mock**) | ＋mob | Make real **[BE]** or remove |
-| Active sessions | ✗ | ✓ (**mock**) | ＋mob | Make real **[BE]** or remove |
+| Theme (light/dark/auto) | ✗ | ✗ | = | Deferred; mobile is explicitly light-only |
+| Notifications prefs | ✗ | ✗ | = | Deferred by product decision |
+| Active sessions | ✗ | ✗ | = | Not exposed until a real backend contract exists |
 
 ### Staff / Team
 | Item | Web | Mobile | Status |
 |---|---|---|---|
 | Assistant CRUD, 6 permission codes, block/activate, reset-pw, delete | ✓ | ✓ | = (verify 6 codes + manage⇒view rule) |
 | Status filter Active/Blocked/Deleted + pagination | ✓ | (verify) | Δ? |
-| **Action Logs (audit) tab** | ✓ | ✗ | ＋web → BIG-5 |
+| **Action Logs (audit) tab** | ✓ | ✓ | = |
 | Subscription/staff-limit banner | ✓ | ✓ | = |
 
 ### Analytics — ＋web → BIG-1 (mobile has none)

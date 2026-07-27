@@ -31,7 +31,12 @@ export default function LanguageSheet({ visible, onClose }: Props) {
   }
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('settings.languageSheet.title')}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={t('settings.languageSheet.title')}
+      closeAccessibilityLabel={t('common.close')}
+    >
       <View style={styles.list}>
         {SUPPORTED_LOCALES.map((l, idx) => {
           const active = l === locale

@@ -56,19 +56,18 @@ npm run test:e2e         # all Maestro flows (needs a running device/emulator + 
 Covers the **logic that must not regress**: `api/client.ts` (auth/refresh/error
 normalization — 80% floor), all `stores/*` (95% floor), api slices
 (`patients-search`, `patients-mutations`, `appointments`, `payments`, `treatments`,
-`team`, `odontogram`), and lib helpers (`format`, `groupPatients`, `permissions`,
+`team`), and lib helpers (`format`, `groupPatients`, `permissions`,
 `offlineGuard`, `currentLocale`, `useDebouncedValue`). Uses `axios-mock-adapter`.
 Global coverage floor is intentionally low; **don't chase the global number — keep
 the high floors on `stores/` and `api/client.ts` green.**
 
-### Maestro E2E (`.maestro/flows/`, 10 flows, appId `uz.identa.mobile`)
+### Maestro E2E (`.maestro/flows/`, appId `uz.identa.mobile`)
 Tagged for targeted runs:
 | Flow | Tags |
 |---|---|
 | `00-smoke` | smoke |
 | `01-login` / `02-login-failure` | smoke,auth / auth |
 | `03-tab-navigation` / `04-patient-search` | navigation |
-| `05-odontogram` | navigation,odontogram |
 | `06-treatment-create` / `07-treatment-delete` | navigation,treatment |
 | `08-logout` | auth,smoke |
 | `09-dashboard-smoke` | smoke,navigation |
@@ -76,7 +75,6 @@ Tagged for targeted runs:
 npm run test:e2e:smoke      # fast confidence pass
 npm run test:e2e:auth       # auth flows
 npm run test:e2e:nav        # navigation
-npm run test:e2e:odontogram # odontogram
 npm run test:e2e:treatment  # treatment create/delete
 ```
 > **E2E gaps to add** (see `ROADMAP.md`): no flow for appointment create/edit,
@@ -125,16 +123,13 @@ and at least once with an **assistant** (limited permissions) and a **read-only*
 - [ ] Week grid ↔ day timeline switch; week strip dots; swipe weeks; jump-to-today.
 - [ ] Create appointment (patient + date prefill from other screens works).
 - [ ] Conflict warning when overlapping a scheduled appointment.
-- [ ] Status change (scheduled→completed/cancelled/no_show) + reminder cancels.
-- [ ] Local reminder fires ~30 min before (leave the app, wait / set a near time).
+- [ ] Status change (scheduled→completed/cancelled/no_show) updates and persists.
 
-### Treatments / odontogram / images
+### Treatments / images
 - [ ] Open a patient → add treatment (type, back-dated date, tooth picker, amounts,
       comment, photos). Edit and delete.
 - [ ] Record a payment on a treatment (cash/card/bank_transfer; amount capped at
       balance). Delete a payment; balances recompute.
-- [ ] Odontogram chart colors + per-tooth counts match the summary; tooth-detail
-      modal opens. ⚠️ No standalone condition editing (by design).
 
 ### Payments
 - [ ] Debt list totals (paid/debt/net) and per-patient balances are correct.
@@ -175,9 +170,8 @@ upgrading a slice (full contract in `IDENTA_WEB_REFERENCE.md`):
 
 ## 5. Regression watch / release gotchas
 
-- **Cache key:** if you change any `api/*` response mapper's output shape, bump
-  `@identa/query-cache-vN` in `App.tsx`. Skipping this hydrates stale rows from a
-  previous version (classic symptom: a dashboard card shows a non-number).
+- **Session cache:** protected React Query data is in-memory only. Verify logout,
+  automatic 401/403 logout, account switching, and permission changes clear it.
 - **EAS push:** `app.json → extra.eas` is empty (no `projectId`). Until `eas init`
   wires it, expo push-token resolution may no-op — verify on a real build, not Expo Go.
 - **Submit creds:** `eas.json` `submit` has `REPLACE_WITH_*` Apple placeholders — fill

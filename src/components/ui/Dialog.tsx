@@ -14,7 +14,14 @@ import * as Haptics from 'expo-haptics'
 import Icon, { IconName } from './Icon'
 import Button from './Button'
 import { useI18n } from '../../i18n'
-import { radius, spacing, typography, shadows, font } from '../../constants/theme'
+import {
+  inputMetrics,
+  radius,
+  spacing,
+  typography,
+  shadows,
+  font,
+} from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 
 // App-styled replacements for the raw OS Alert.alert / ActionSheetIOS. Used
@@ -40,6 +47,7 @@ export interface ActionItem {
   label: string
   icon?: IconName
   destructive?: boolean
+  disabled?: boolean
 }
 
 export interface ActionSheetOptions {
@@ -47,6 +55,7 @@ export interface ActionSheetOptions {
   message?: string
   options: ActionItem[]
   cancelLabel?: string
+  layout?: 'list' | 'grid'
 }
 
 interface DialogContextValue {
@@ -222,6 +231,7 @@ function ConfirmBody({
             value={text}
             onChangeText={setText}
             placeholder={opts.requireTextPlaceholder}
+            accessibilityLabel={opts.requireTextLabel ?? opts.requireTextPlaceholder}
             placeholderTextColor={c.labelTertiary as string}
             style={styles.requireInput}
             autoCapitalize="none"
@@ -267,33 +277,70 @@ function ActionBody({
   onSelect: (index: number) => void
   onCancel: () => void
 }) {
+  const isGrid = opts.layout === 'grid'
+  const isSingleGridAction = isGrid && opts.options.length === 1
+
   return (
     <>
-      {opts.title ? <Text style={styles.title}>{opts.title}</Text> : null}
+      {opts.title ? <Text style={styles.title} numberOfLines={2}>{opts.title}</Text> : null}
       {opts.message ? <Text style={styles.message}>{opts.message}</Text> : null}
-      <View style={styles.actionList}>
+      <View style={[styles.actionList, isGrid && styles.actionGrid]}>
         {opts.options.map((opt, i) => (
           <Pressable
             key={i}
             onPress={() => onSelect(i)}
-            style={({ pressed }) => [styles.actionRow, pressed && styles.rowPressed]}
+            disabled={opt.disabled}
+            accessibilityRole="button"
+            accessibilityLabel={opt.label}
+            accessibilityState={{ disabled: Boolean(opt.disabled) }}
+            style={({ pressed }) => [
+              isGrid ? styles.actionTile : styles.actionRow,
+              isSingleGridAction && styles.actionTileSingle,
+              pressed && !opt.disabled && styles.rowPressed,
+              opt.disabled && styles.actionRowDisabled,
+            ]}
           >
             {opt.icon ? (
-              <Icon
-                name={opt.icon}
-                size={20}
-                color={(opt.destructive ? c.danger : c.brand) as string}
-              />
+              <View style={isGrid ? styles.actionTileIcon : undefined}>
+                <Icon
+                  name={opt.icon}
+                  size={isGrid ? 19 : 20}
+                  color={
+                    (opt.disabled
+                      ? c.labelTertiary
+                      : opt.destructive
+                        ? c.danger
+                        : c.brand) as string
+                  }
+                />
+              </View>
             ) : null}
             <Text
-              style={[styles.actionLabel, opt.destructive && { color: c.danger as string }]}
+              numberOfLines={isGrid ? 2 : 1}
+              adjustsFontSizeToFit={isGrid}
+              minimumFontScale={isGrid ? 0.82 : undefined}
+              style={[
+                styles.actionLabel,
+                isGrid && styles.actionTileLabel,
+                opt.destructive && !opt.disabled && { color: c.danger as string },
+                opt.disabled && { color: c.labelTertiary as string },
+              ]}
             >
               {opt.label}
             </Text>
           </Pressable>
         ))}
       </View>
-      <Pressable onPress={onCancel} style={({ pressed }) => [styles.cancelRow, pressed && styles.rowPressed]}>
+      <Pressable
+        onPress={onCancel}
+        accessibilityRole="button"
+        accessibilityLabel={cancelLabel}
+        style={({ pressed }) => [
+          styles.cancelRow,
+          isGrid && styles.gridCloseRow,
+          pressed && styles.rowPressed,
+        ]}
+      >
         <Text style={styles.cancelText}>{cancelLabel}</Text>
       </Pressable>
     </>
@@ -353,15 +400,17 @@ function makeStyles(c: Colors) {
       paddingHorizontal: 4,
     },
     requireInput: {
-      ...typography.body,
       fontFamily: font('500'),
+      height: inputMetrics.height,
+      fontSize: inputMetrics.fontSize,
+      lineHeight: inputMetrics.lineHeight,
       color: c.label,
       backgroundColor: c.background,
       borderWidth: 1.2,
       borderColor: c.separator as string,
       borderRadius: radius.lg,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
+      paddingHorizontal: inputMetrics.paddingHorizontal,
+      paddingVertical: 0,
       textAlign: 'center',
     },
     confirmActions: {
@@ -373,6 +422,12 @@ function makeStyles(c: Colors) {
       marginTop: spacing.md,
       gap: spacing.xs,
     },
+    actionGrid: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      justifyContent: 'center',
+      gap: 6,
+    },
     actionRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -382,10 +437,46 @@ function makeStyles(c: Colors) {
       borderRadius: radius.lg,
       backgroundColor: c.fillQuaternary,
     },
+    actionTile: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 66,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+      paddingHorizontal: 4,
+      paddingVertical: 7,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.brandSoft,
+      borderRadius: radius.md,
+      backgroundColor: c.background,
+    },
+    actionTileSingle: {
+      flexGrow: 0,
+      flexBasis: 164,
+      maxWidth: 164,
+    },
+    actionTileIcon: {
+      width: 28,
+      height: 28,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.pill,
+      backgroundColor: c.brandSurface,
+    },
     rowPressed: { opacity: 0.6 },
+    actionRowDisabled: { opacity: 0.58 },
     actionLabel: {
       ...typography.bodyEmphasized,
       color: c.label,
+    },
+    actionTileLabel: {
+      fontSize: 11,
+      lineHeight: 14,
+      fontFamily: font('600'),
+      fontWeight: '600',
+      letterSpacing: -0.15,
+      textAlign: 'center',
     },
     cancelRow: {
       marginTop: spacing.sm,
@@ -393,6 +484,13 @@ function makeStyles(c: Colors) {
       alignItems: 'center',
       borderRadius: radius.lg,
       backgroundColor: c.fillTertiary,
+    },
+    gridCloseRow: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingVertical: 9,
+      borderRadius: radius.md,
+      backgroundColor: c.fillQuaternary,
     },
     cancelText: {
       ...typography.bodyEmphasized,

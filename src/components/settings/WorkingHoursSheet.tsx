@@ -1,16 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, StyleSheet, Pressable } from 'react-native'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 import BottomSheet from '../ui/BottomSheet'
 import InputCard from '../ui/InputCard'
 import Button from '../ui/Button'
+import ProfileFormGuard from './ProfileFormGuard'
 import { useToast } from '../ui/Toast'
 import { getProfile, updateProfile } from '../../api/profile'
 import { useI18n } from '../../i18n'
 import { radius, spacing, font, typography } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import { isOfflineError } from '../../lib/offlineGuard'
+import { useSettingsFormDismiss } from './useSettingsFormDismiss'
 
 interface Props {
   visible: boolean
@@ -36,14 +38,25 @@ export default function WorkingHoursSheet({ visible, onClose }: Props) {
   const [start, setStart] = useState('09:00')
   const [end, setEnd] = useState('18:00')
   const [duration, setDuration] = useState(30)
+  const [submitted, setSubmitted] = useState(false)
+  const initialValues = useRef('')
 
   useEffect(() => {
-    if (profileQuery.data) {
-      setStart(profileQuery.data.working_hours.start ?? '09:00')
-      setEnd(profileQuery.data.working_hours.end ?? '18:00')
-      setDuration(profileQuery.data.default_appointment_duration ?? 30)
+    if (visible && profileQuery.data) {
+      const nextStart = profileQuery.data.working_hours.start ?? '09:00'
+      const nextEnd = profileQuery.data.working_hours.end ?? '18:00'
+      const nextDuration = profileQuery.data.default_appointment_duration ?? 30
+      setStart(nextStart)
+      setEnd(nextEnd)
+      setDuration(nextDuration)
+      setSubmitted(false)
+      initialValues.current = JSON.stringify({
+        start: nextStart,
+        end: nextEnd,
+        duration: nextDuration,
+      })
     }
-  }, [profileQuery.data])
+  }, [profileQuery.data, visible])
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -63,8 +76,42 @@ export default function WorkingHoursSheet({ visible, onClose }: Props) {
     },
   })
 
+  const startInvalid = !isValidTime(start)
+  const endInvalid = !isValidTime(end)
+  const rangeInvalid = !startInvalid && !endInvalid && end <= start
+
+  const handleSubmit = () => {
+    if (!profileQuery.data) return
+    setSubmitted(true)
+    if (startInvalid || endInvalid || rangeInvalid) {
+      toast.error(t('settings.hoursSheet.invalid'))
+      return
+    }
+    mutation.mutate()
+  }
+
+  const isDirty =
+    visible &&
+    Boolean(profileQuery.data) &&
+    initialValues.current !== JSON.stringify({ start, end, duration })
+  const canDismiss = useSettingsFormDismiss({
+    isDirty,
+    isPending: mutation.isPending,
+  })
+
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('settings.rows.workingHours')}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      onBeforeClose={canDismiss}
+      title={t('settings.rows.workingHours')}
+      closeAccessibilityLabel={t('common.close')}
+    >
+      <ProfileFormGuard
+        isLoading={profileQuery.isLoading}
+        isError={profileQuery.isError && !profileQuery.data}
+        onRetry={() => profileQuery.refetch()}
+      >
       <View style={styles.scheduleNote}>
         <Text style={styles.scheduleText}>
           {t('settings.hoursSheet.currentSchedule', { start, end })}
@@ -80,6 +127,7 @@ export default function WorkingHoursSheet({ visible, onClose }: Props) {
             placeholder="09:00"
             keyboardType="numeric"
             maxLength={5}
+            error={submitted && startInvalid}
           />
         </Field>
         <Field label={t('settings.hoursSheet.endLabel')} style={{ flex: 1 }}>
@@ -90,6 +138,7 @@ export default function WorkingHoursSheet({ visible, onClose }: Props) {
             placeholder="18:00"
             keyboardType="numeric"
             maxLength={5}
+            error={submitted && (endInvalid || rangeInvalid)}
           />
         </Field>
       </View>
@@ -118,12 +167,13 @@ export default function WorkingHoursSheet({ visible, onClose }: Props) {
 
       <Button
         title={t('settings.hoursSheet.save')}
-        onPress={() => mutation.mutate()}
+        onPress={handleSubmit}
         loading={mutation.isPending}
         fullWidth
         size="lg"
         style={{ marginTop: spacing.xs }}
       />
+      </ProfileFormGuard>
     </BottomSheet>
   )
 }
@@ -152,6 +202,10 @@ function sanitizeTime(input: string): string {
   if (out.length === 2 && !out.includes(':')) out = out + ':'
   if (out.length > 5) out = out.slice(0, 5)
   return out
+}
+
+function isValidTime(value: string): boolean {
+  return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
 }
 
 function makeStyles(c: Colors) {

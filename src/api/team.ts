@@ -1,10 +1,14 @@
 import client from './client'
 import type { ApiAssistant, ApiListResponse, ApiResponse } from '../types'
+import { shouldUseMockApi } from '../lib/mockApi'
+import { requireOnline } from '../lib/offlineGuard'
 
-// Per-resource override. Flip via `EXPO_PUBLIC_MOCK_TEAM=false`.
+// Production-safe default: mock team data must be explicitly enabled.
 const USE_MOCK =
-  process.env.EXPO_PUBLIC_MOCK_TEAM !== 'false' &&
-  process.env.EXPO_PUBLIC_USE_MOCK_API !== 'false'
+  shouldUseMockApi(
+    process.env.EXPO_PUBLIC_MOCK_TEAM,
+    process.env.EXPO_PUBLIC_USE_MOCK_API
+  )
 
 function mockDelay<T>(value: T, ms = 400): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms))
@@ -36,29 +40,40 @@ let MOCK_TEAM: ApiAssistant[] = [
 export interface AssistantPayload {
   name: string
   email: string
-  phone?: string
+  phone?: string | null
   password?: string
   permissions: string[]
 }
 
-export const listAssistants = async (): Promise<ApiListResponse<ApiAssistant>> => {
+export const listAssistants = async (
+  page = 1,
+  perPage = 20
+): Promise<ApiListResponse<ApiAssistant>> => {
   if (USE_MOCK) {
+    const visibleTeam = MOCK_TEAM.filter((a) => a.account_status !== 'deleted')
+    const totalPages = Math.max(1, Math.ceil(visibleTeam.length / perPage))
+    const offset = (page - 1) * perPage
     return mockDelay({
-      data: MOCK_TEAM.filter((a) => a.account_status !== 'deleted'),
+      data: visibleTeam.slice(offset, offset + perPage),
       meta: {
         pagination: {
-          current_page: 1,
-          last_page: 1,
-          per_page: 50,
-          total: MOCK_TEAM.filter((a) => a.account_status !== 'deleted').length,
+          page,
+          total_pages: totalPages,
+          per_page: perPage,
+          total: visibleTeam.length,
         },
       },
     })
   }
-  return client.get<ApiListResponse<ApiAssistant>>('/team/assistants').then((r) => r.data)
+  return client
+    .get<ApiListResponse<ApiAssistant>>('/team/assistants', {
+      params: { page, per_page: perPage },
+    })
+    .then((r) => r.data)
 }
 
 export const createAssistant = async (payload: AssistantPayload): Promise<ApiAssistant> => {
+  requireOnline()
   if (USE_MOCK) {
     if (!payload.name.trim() || !payload.email.trim()) throw new Error('Missing fields')
     if ((payload.password?.length ?? 0) < 8) throw new Error('Password too short')
@@ -86,6 +101,7 @@ export const createAssistant = async (payload: AssistantPayload): Promise<ApiAss
 }
 
 export const updateAssistant = async (id: string, payload: AssistantPayload): Promise<ApiAssistant> => {
+  requireOnline()
   if (USE_MOCK) {
     MOCK_TEAM = MOCK_TEAM.map((a) =>
       a.id === id
@@ -109,6 +125,7 @@ export const updateAssistantStatus = async (
   id: string,
   status: 'active' | 'blocked'
 ): Promise<ApiAssistant> => {
+  requireOnline()
   if (USE_MOCK) {
     MOCK_TEAM = MOCK_TEAM.map((a) => (a.id === id ? { ...a, account_status: status } : a))
     const updated = MOCK_TEAM.find((a) => a.id === id)
@@ -126,6 +143,7 @@ export const resetAssistantPassword = async (
   id: string,
   newPassword: string
 ): Promise<void> => {
+  requireOnline()
   if (USE_MOCK) {
     if (newPassword.length < 8) throw new Error('Password too short')
     return mockDelay(undefined, 500)
@@ -137,6 +155,7 @@ export const resetAssistantPassword = async (
 }
 
 export const deleteAssistant = async (id: string): Promise<void> => {
+  requireOnline()
   if (USE_MOCK) {
     MOCK_TEAM = MOCK_TEAM.map((a) =>
       a.id === id ? { ...a, account_status: 'deleted' } : a

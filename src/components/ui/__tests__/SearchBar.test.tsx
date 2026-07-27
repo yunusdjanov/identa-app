@@ -36,10 +36,17 @@ describe('<SearchBar />', () => {
   })
 
   it('shows a spinner instead of the clear button when loading', () => {
-    const { getByTestId, queryByTestId } = render(
-      <SearchBar value="Test" onChangeText={() => {}} placeholder="Search" loading />
+    const { getByTestId, getByLabelText, queryByTestId } = render(
+      <SearchBar
+        value="Test"
+        onChangeText={() => {}}
+        placeholder="Search"
+        loading
+        loadingAccessibilityLabel="Loading patients"
+      />
     )
     expect(getByTestId('searchbar-spinner')).toBeTruthy()
+    expect(getByLabelText('Loading patients')).toHaveAccessibilityState({ busy: true })
     // Clear button is suppressed when loading.
     expect(queryByTestId('searchbar-clear')).toBeNull()
   })
@@ -49,5 +56,34 @@ describe('<SearchBar />', () => {
       <SearchBar value="" onChangeText={() => {}} placeholder="Search" loading />
     )
     expect(getByTestId('searchbar-spinner')).toBeTruthy()
+  })
+
+  it('preserves caller focus and blur callbacks', () => {
+    const onFocus = jest.fn()
+    const onBlur = jest.fn()
+    const { getByPlaceholderText } = render(
+      <SearchBar
+        value=""
+        onChangeText={() => {}}
+        placeholder="Search"
+        onFocus={onFocus}
+        onBlur={onBlur}
+      />
+    )
+    const input = getByPlaceholderText('Search')
+
+    fireEvent(input, 'focus')
+    fireEvent(input, 'blur')
+
+    expect(onFocus).toHaveBeenCalledTimes(1)
+    expect(onBlur).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the placeholder as the default accessible input label', () => {
+    const { getByLabelText } = render(
+      <SearchBar value="" onChangeText={() => {}} placeholder="Search patients" />
+    )
+
+    expect(getByLabelText('Search patients')).toBeTruthy()
   })
 })

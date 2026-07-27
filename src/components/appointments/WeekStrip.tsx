@@ -1,9 +1,16 @@
 import React, { useMemo } from 'react'
-import { View, Text, Pressable, StyleSheet } from 'react-native'
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { useI18n } from '../../i18n'
-import { addDays, formatWeekdayShort, getWeekStart, isSameDay, toLocalDateKey } from '../../lib/format'
-import { radius, font, typography } from '../../constants/theme'
+import {
+  addDays,
+  formatDayMonth,
+  formatWeekdayShort,
+  getWeekStart,
+  isSameDay,
+  toLocalDateKey,
+} from '../../lib/format'
+import { radius, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 
 interface Props {
@@ -13,8 +20,8 @@ interface Props {
   busyDateKeys?: Set<string>
 }
 
-const DAY_CELL_WIDTH = 44
-const DAY_CELL_HEIGHT = 60
+const DAY_CELL_WIDTH = 48
+const DAY_CELL_HEIGHT = 52
 
 export default function WeekStrip({ selectedDate, onSelect, busyDateKeys }: Props) {
   const { locale } = useI18n()
@@ -26,7 +33,11 @@ export default function WeekStrip({ selectedDate, onSelect, busyDateKeys }: Prop
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
 
   return (
-    <View style={styles.wrap}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.wrap}
+    >
       {days.map((d) => {
         const isSelected = isSameDay(d, selectedDate)
         const isToday = isSameDay(d, today)
@@ -45,8 +56,12 @@ export default function WeekStrip({ selectedDate, onSelect, busyDateKeys }: Prop
               isSelected && styles.cellSelected,
               !isSelected && pressed && styles.cellPressed,
             ]}
+            accessibilityRole="button"
+            accessibilityLabel={`${formatWeekdayShort(d, locale)}, ${formatDayMonth(d, locale)}`}
+            accessibilityState={{ selected: isSelected }}
           >
             <Text
+              maxFontSizeMultiplier={1.3}
               style={[
                 styles.weekday,
                 isSelected && styles.weekdayActive,
@@ -55,6 +70,7 @@ export default function WeekStrip({ selectedDate, onSelect, busyDateKeys }: Prop
               {formatWeekdayShort(d, locale).slice(0, 3)}
             </Text>
             <Text
+              maxFontSizeMultiplier={1.3}
               style={[
                 styles.dayNumber,
                 isSelected && styles.dayNumberActive,
@@ -73,18 +89,19 @@ export default function WeekStrip({ selectedDate, onSelect, busyDateKeys }: Prop
           </Pressable>
         )
       })}
-    </View>
+    </ScrollView>
   )
 }
 
 function makeStyles(c: Colors) {
   return StyleSheet.create({
   wrap: {
+    minWidth: '100%',
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 0,
+    paddingVertical: 4,
   },
   cell: {
     alignItems: 'center',
@@ -92,7 +109,7 @@ function makeStyles(c: Colors) {
     width: DAY_CELL_WIDTH,
     height: DAY_CELL_HEIGHT,
     borderRadius: radius.lg,
-    gap: 2,
+    gap: 1,
   },
   cellSelected: {
     backgroundColor: c.brand,

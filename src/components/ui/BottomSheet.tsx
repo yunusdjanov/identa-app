@@ -19,8 +19,15 @@ import { useColors, type Colors } from '../../lib/useColors'
 interface Props {
   visible: boolean
   onClose: () => void
+  /**
+   * Runs before the closing animation. Return false to keep the sheet open.
+   * This is used by forms that need to confirm discarding unsaved changes.
+   */
+  onBeforeClose?: () => boolean | Promise<boolean>
   title: string
+  closeAccessibilityLabel: string
   children: React.ReactNode
+  footer?: React.ReactNode
   // When true, content is rendered inside a ScrollView (default).
   scroll?: boolean
 }
@@ -28,12 +35,23 @@ interface Props {
 // Reusable iOS-style bottom sheet: backdrop + slide-up panel with drag
 // handle, title row, close button, and scrollable content. Handles
 // keyboard avoidance automatically. Animations are 280ms cubic-out.
-export default function BottomSheet({ visible, onClose, title, children, scroll = true }: Props) {
+export default function BottomSheet({
+  visible,
+  onClose,
+  onBeforeClose,
+  title,
+  closeAccessibilityLabel,
+  children,
+  footer,
+  scroll = true,
+}: Props) {
   const insets = useSafeAreaInsets()
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const slide = useRef(new Animated.Value(700)).current
   const fade = useRef(new Animated.Value(0)).current
+  const closing = useRef(false)
+  const closeRequestPending = useRef(false)
 
   useEffect(() => {
     if (visible) {
@@ -52,15 +70,33 @@ export default function BottomSheet({ visible, onClose, title, children, scroll 
     }
   }, [visible, slide, fade])
 
-  const close = () => {
+  const close = async () => {
+    if (closing.current || closeRequestPending.current) return
+
+    closeRequestPending.current = true
+    let allowed = true
+    try {
+      if (onBeforeClose) allowed = await onBeforeClose()
+    } catch {
+      allowed = false
+    } finally {
+      closeRequestPending.current = false
+    }
+    if (!allowed) return
+
+    closing.current = true
     Animated.parallel([
       Animated.timing(slide, { toValue: 700, duration: 220, useNativeDriver: true }),
       Animated.timing(fade, { toValue: 0, duration: 160, useNativeDriver: true }),
-    ]).start(() => onClose())
+    ]).start(() => {
+      closing.current = false
+      onClose()
+    })
   }
 
   const Content = scroll ? (
     <ScrollView
+      style={styles.scrollView}
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={styles.scroll}
       showsVerticalScrollIndicator={false}
@@ -72,8 +108,20 @@ export default function BottomSheet({ visible, onClose, title, children, scroll 
   )
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={close}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={close}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="none"
+      onRequestClose={() => {
+        void close()
+      }}
+    >
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={() => {
+          void close()
+        }}
+      >
         <Animated.View style={[styles.backdrop, { opacity: fade }]} />
       </Pressable>
 
@@ -83,6 +131,7 @@ export default function BottomSheet({ visible, onClose, title, children, scroll 
         pointerEvents="box-none"
       >
         <Animated.View
+          accessibilityViewIsModal
           style={[
             styles.sheet,
             shadows.lg,
@@ -92,13 +141,26 @@ export default function BottomSheet({ visible, onClose, title, children, scroll 
           <View style={styles.handle} />
 
           <View style={styles.titleRow}>
-            <Text style={styles.title} numberOfLines={1}>{title}</Text>
-            <Pressable onPress={close} hitSlop={10} style={styles.closeBtn}>
+            <Text accessibilityRole="header" style={styles.title} numberOfLines={1}>{title}</Text>
+            <Pressable
+              onPress={() => {
+                void close()
+              }}
+              hitSlop={10}
+              style={styles.closeBtn}
+              accessibilityRole="button"
+              accessibilityLabel={closeAccessibilityLabel}
+            >
               <Icon name="close" size={20} color={c.labelSecondary as string} />
             </Pressable>
           </View>
 
           {Content}
+          {footer ? (
+            <View testID="bottom-sheet-footer" style={styles.footer}>
+              {footer}
+            </View>
+          ) : null}
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
@@ -153,6 +215,16 @@ function makeStyles(c: Colors) {
     staticContent: {
       paddingHorizontal: spacing.xl,
       paddingBottom: spacing.lg,
+    },
+    scrollView: {
+      flexShrink: 1,
+    },
+    footer: {
+      paddingHorizontal: spacing.xl,
+      paddingTop: spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.separator,
+      backgroundColor: c.background,
     },
   })
 }

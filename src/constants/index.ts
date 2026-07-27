@@ -8,9 +8,8 @@
 // on the dev laptop is reachable out of the box.
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://10.0.2.2:8001/api/v1'
 
-// Device name reported to the backend on login. Sanctum uses this as the
-// token name so each device gets its own row in `personal_access_tokens`
-// and signing out one phone doesn't kill another.
+// Human-readable device label reported to the backend. The backend appends a
+// unique token-family id, so multiple installations can safely share it.
 export const DEVICE_NAME = 'Identa Mobile'
 
 // Access tokens issued by the backend expire after 15 minutes (per

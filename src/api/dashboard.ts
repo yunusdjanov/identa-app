@@ -1,110 +1,11 @@
 import client from './client'
-import type { DashboardSnapshot, DashboardAppointmentView } from '../types'
-
-// Per-resource override: `EXPO_PUBLIC_MOCK_DASHBOARD=false` flips this
-// slice to real backend while keeping global `USE_MOCK_API` for any
-// resource that hasn't been migrated yet.
-const USE_MOCK =
-  process.env.EXPO_PUBLIC_MOCK_DASHBOARD !== 'false' &&
-  process.env.EXPO_PUBLIC_USE_MOCK_API !== 'false'
-
-function mockDelay<T>(value: T, ms = 500): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms))
-}
-
-const MOCK_PATIENTS = [
-  'Aziz Karimov',
-  'Dilshod Akhmedov',
-  'Sevara Yusupova',
-  'Rustam Tashkenboev',
-  'Madina Saidova',
-  'Bekzod Rasulov',
-  'Nilufar Karimova',
-  'Sardor Ergashev',
-  'Iroda Mirzaeva',
-  'Jasur Holikov',
-]
-
-const MOCK_REASONS = [
-  'Tish davolash',
-  'Konsultatsiya',
-  'Pulpit davolash',
-  "Plomba qo'yish",
-  'Tish tozalash',
-  'Krongina',
-  'Tish olib tashlash',
-  'Implant',
-  'Tish to\'g\'rilash',
-  'Ortodontiya',
-]
-
-const MOCK_DURATIONS = [30, 45, 60]
-
-function pad(n: number): string {
-  return String(n).padStart(2, '0')
-}
-
-function buildMockAppointments(date: string): DashboardAppointmentView[] {
-  const now = new Date()
-  const nowMinutes = now.getHours() * 60 + now.getMinutes()
-  const appointments: DashboardAppointmentView[] = []
-  const dayStart = 8 * 60       // 08:00
-  const dayEnd = 20 * 60        // 20:00
-
-  // 3 past appointments (completed)
-  for (let i = 3; i >= 1; i--) {
-    const startMin = nowMinutes - i * 70
-    if (startMin < dayStart) continue
-    appointments.push(makeAppointment(date, startMin, 'completed', appointments.length))
-  }
-
-  // Always produce ~5 upcoming. If "now" is late, generate slots wrapping forward
-  // so demo data is never empty (mock-only behavior — real backend returns truth).
-  let cursor = Math.max(nowMinutes + 20, dayStart + 30)
-  cursor = Math.ceil(cursor / 5) * 5
-
-  for (let i = 0; i < 5; i++) {
-    // If we'd overflow the day, wrap into a pseudo-evening slot so user always
-    // sees upcoming items in the dev mock.
-    if (cursor + 60 > dayEnd) {
-      cursor = dayEnd - (5 - i) * 60 + i * 10
-      if (cursor < nowMinutes + 20) cursor = nowMinutes + 20
-    }
-    appointments.push(makeAppointment(date, cursor, 'scheduled', appointments.length))
-    cursor += 50 + (i % 2 === 0 ? 10 : 0)
-  }
-
-  return appointments
-}
-
-function makeAppointment(
-  date: string,
-  startMinutes: number,
-  status: DashboardAppointmentView['status'],
-  index: number
-): DashboardAppointmentView {
-  const h = Math.floor(startMinutes / 60)
-  const m = startMinutes % 60
-  return {
-    id: `mock-${index}`,
-    patient_name: MOCK_PATIENTS[index % MOCK_PATIENTS.length],
-    appointment_date: date,
-    start_time: `${pad(h)}:${pad(m)}`,
-    duration_minutes: MOCK_DURATIONS[index % MOCK_DURATIONS.length],
-    status,
-    reason: MOCK_REASONS[index % MOCK_REASONS.length],
-  }
-}
+import type {
+  DashboardAppointmentView,
+  DashboardSnapshot,
+  DashboardCurrency,
+} from '../types'
 
 export const getDashboardSnapshot = async (date: string): Promise<DashboardSnapshot> => {
-  if (USE_MOCK) {
-    return mockDelay<DashboardSnapshot>({
-      date,
-      revenue_this_month: 4_500_000,
-      outstanding_debt_total: 890_000,
-      today_appointments: buildMockAppointments(date),
-    })
-  }
   // The backend accepts an optional `date` query (YYYY-MM-DD); default
   // is today on the server. The today_appointments items come back in
   // camelCase (patientName, appointmentDate, startTime, durationMinutes)
@@ -127,8 +28,15 @@ export const getDashboardSnapshot = async (date: string): Promise<DashboardSnaps
 // because `formatCurrencyParts(undefined, ...)` → `Math.abs(undefined)` → NaN.
 interface BackendDashboardSnapshot {
   date: string
+  workingHoursEnd?: string
   revenueThisMonth: number | string
   outstandingDebtTotal: number | string
+  financialsByCurrency?: Partial<
+    Record<
+      DashboardCurrency,
+      { revenueThisMonth: number | string; outstandingDebtTotal: number | string }
+    >
+  >
   todayAppointments: Array<{
     id: string
     patientName: string
@@ -150,10 +58,28 @@ function toNumber(value: number | string | null | undefined): number {
 }
 
 function mapDashboard(raw: BackendDashboardSnapshot): DashboardSnapshot {
-  return {
-    date: raw.date,
+  const legacyUzs = {
     revenue_this_month: toNumber(raw.revenueThisMonth),
     outstanding_debt_total: toNumber(raw.outstandingDebtTotal),
+  }
+  const financialsByCurrency = {
+    UZS: raw.financialsByCurrency?.UZS
+      ? {
+          revenue_this_month: toNumber(raw.financialsByCurrency.UZS.revenueThisMonth),
+          outstanding_debt_total: toNumber(raw.financialsByCurrency.UZS.outstandingDebtTotal),
+        }
+      : legacyUzs,
+    USD: {
+      revenue_this_month: toNumber(raw.financialsByCurrency?.USD?.revenueThisMonth),
+      outstanding_debt_total: toNumber(raw.financialsByCurrency?.USD?.outstandingDebtTotal),
+    },
+  }
+  return {
+    date: raw.date,
+    working_hours_end: raw.workingHoursEnd?.slice(0, 5) || '17:00',
+    revenue_this_month: financialsByCurrency.UZS.revenue_this_month,
+    outstanding_debt_total: financialsByCurrency.UZS.outstanding_debt_total,
+    financials_by_currency: financialsByCurrency,
     today_appointments: (raw.todayAppointments ?? []).map((apt) => ({
       id: apt.id,
       patient_name: apt.patientName,

@@ -16,10 +16,13 @@ export function toIntlLocale(locale: Locale): string {
 // For dental clinic context, all currency is UZS regardless of locale.
 // Split-format for visual hierarchy: { value: "4.5", unit: "mln so'm" }.
 // Used by hero/finance cards that style value and unit differently.
-export function formatCurrencyParts(amount: number, locale: Locale): { value: string; unit: string } {
+export function formatCurrencyParts(
+  amount: number,
+  locale: Locale,
+  currency: 'UZS' | 'USD' = 'UZS'
+): { value: string; unit: string } {
   // Defensive: backend can transiently ship null/undefined/NaN before a
-  // refetch completes, and React Query's persisted cache may rehydrate
-  // stale values from before a mapper fix. Treating anything non-finite
+  // refetch completes. Treating anything non-finite
   // as 0 keeps the card readable instead of rendering Intl.NumberFormat's
   // locale-specific "не число" / "NaN" output.
   const safe = Number.isFinite(amount) ? amount : 0
@@ -28,15 +31,15 @@ export function formatCurrencyParts(amount: number, locale: Locale): { value: st
 
   if (abs >= 1_000_000) {
     const v = (abs / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1)
-    return { value: `${sign}${stripTrailingZero(v)}`, unit: currencySuffix(locale, 'M').trim() }
+    return { value: `${sign}${stripTrailingZero(v)}`, unit: currencySuffix(locale, 'M', currency).trim() }
   }
   if (abs >= 1_000) {
     const v = (abs / 1_000).toFixed(abs >= 100_000 ? 0 : 1)
-    return { value: `${sign}${stripTrailingZero(v)}`, unit: currencySuffix(locale, 'K').trim() }
+    return { value: `${sign}${stripTrailingZero(v)}`, unit: currencySuffix(locale, 'K', currency).trim() }
   }
   return {
     value: `${sign}${abs.toLocaleString(toIntlLocale(locale))}`,
-    unit: currencyUnit(locale),
+    unit: currencyUnit(locale, currency),
   }
 }
 
@@ -64,7 +67,8 @@ function stripTrailingZero(value: string): string {
   return value.replace(/\.0$/, '')
 }
 
-function currencySuffix(locale: Locale, scale: 'M' | 'K'): string {
+function currencySuffix(locale: Locale, scale: 'M' | 'K', currency: 'UZS' | 'USD' = 'UZS'): string {
+  if (currency === 'USD') return scale === 'M' ? 'M USD' : 'K USD'
   if (scale === 'M') {
     if (locale === 'uz') return " mln so'm"
     if (locale === 'ru') return ' млн сум'
@@ -75,7 +79,8 @@ function currencySuffix(locale: Locale, scale: 'M' | 'K'): string {
   return 'K UZS'
 }
 
-function currencyUnit(locale: Locale): string {
+function currencyUnit(locale: Locale, currency: 'UZS' | 'USD' = 'UZS'): string {
+  if (currency === 'USD') return 'USD'
   if (locale === 'uz') return "so'm"
   if (locale === 'ru') return 'сум'
   return 'UZS'

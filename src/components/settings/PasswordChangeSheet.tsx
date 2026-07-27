@@ -12,6 +12,8 @@ import { useAuthStore } from '../../stores/auth'
 import { spacing, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import { isOfflineError } from '../../lib/offlineGuard'
+import { validatePassword } from '../../lib/validation'
+import { getAuthErrorMessage } from '../../lib/authErrorMessage'
 
 interface Props {
   visible: boolean
@@ -24,6 +26,7 @@ export default function PasswordChangeSheet({ visible, onClose }: Props) {
   const styles = useMemo(() => makeStyles(c), [c])
   const toast = useToast()
   const user = useAuthStore((s) => s.user)
+  const setUser = useAuthStore((s) => s.setUser)
   const hasPassword = user?.has_password !== false && !user?.must_change_password
 
   const [current, setCurrent] = useState('')
@@ -46,13 +49,22 @@ export default function PasswordChangeSheet({ visible, onClose }: Props) {
     }
   }, [visible])
 
-  const tooShort = submitted && next.length < 8
-  const mismatch = submitted && confirm.length > 0 && next !== confirm
-  const errorMsg = tooShort
-    ? t('settings.passwordSheet.tooShort')
-    : mismatch
-      ? t('settings.passwordSheet.mismatch')
-      : null
+  const passwordErrorKey = submitted ? validatePassword(next, { required: true }) : null
+  const passwordError = passwordErrorKey
+    ? passwordErrorKey === 'passwordRequired'
+      ? t('login.errors.passwordRequired')
+      : t(`register.errors.${passwordErrorKey}`)
+    : null
+  const confirmError = submitted
+    ? !confirm
+      ? t('register.errors.passwordConfirmRequired')
+      : next !== confirm
+        ? t('settings.passwordSheet.mismatch')
+        : null
+    : null
+  const currentError = submitted && hasPassword && !current
+    ? t('settings.passwordSheet.currentRequired')
+    : null
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -61,25 +73,38 @@ export default function PasswordChangeSheet({ visible, onClose }: Props) {
         new_password: next,
         new_password_confirmation: confirm,
       }),
-    onSuccess: () => {
+    onSuccess: (updatedUser) => {
+      if (user) {
+        setUser(updatedUser ?? {
+          ...user,
+          has_password: true,
+          must_change_password: false,
+        })
+      }
       toast.success(t('settings.passwordSheet.changed'))
       onClose()
     },
     onError: (err) => {
       if (isOfflineError(err)) return
-      toast.error(t('settings.passwordSheet.failed'))
+      toast.error(getAuthErrorMessage(err, t, 'settings.passwordSheet.failed'))
     },
   })
 
   const handleSubmit = () => {
     setSubmitted(true)
-    if (next.length < 8 || next !== confirm) return
+    if (validatePassword(next, { required: true }) || next !== confirm || !confirm) return
     if (hasPassword && !current) return
     mutation.mutate()
   }
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('settings.rows.password')}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      onBeforeClose={() => !mutation.isPending}
+      title={t('settings.rows.password')}
+      closeAccessibilityLabel={t('common.close')}
+    >
       {hasPassword ? (
         <Field label={t('settings.passwordSheet.currentLabel')}>
           <InputCard
@@ -89,8 +114,15 @@ export default function PasswordChangeSheet({ visible, onClose }: Props) {
             placeholder={t('settings.passwordSheet.currentPlaceholder')}
             secureTextEntry={!showCurrent}
             autoCapitalize="none"
+            error={Boolean(currentError)}
+            errorMessage={currentError ?? undefined}
             rightAccessory={
-              <Pressable onPress={() => setShowCurrent((v) => !v)} hitSlop={10}>
+              <Pressable
+                onPress={() => setShowCurrent((v) => !v)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel={t(showCurrent ? 'login.hide' : 'login.show')}
+              >
                 <Icon
                   name={showCurrent ? 'eye-off-outline' : 'eye-outline'}
                   size={20}
@@ -110,9 +142,15 @@ export default function PasswordChangeSheet({ visible, onClose }: Props) {
           placeholder={t('settings.passwordSheet.newPlaceholder')}
           secureTextEntry={!showNext}
           autoCapitalize="none"
-          error={Boolean(tooShort)}
+          error={Boolean(passwordError)}
+          errorMessage={passwordError ?? undefined}
           rightAccessory={
-            <Pressable onPress={() => setShowNext((v) => !v)} hitSlop={10}>
+            <Pressable
+              onPress={() => setShowNext((v) => !v)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel={t(showNext ? 'login.hide' : 'login.show')}
+            >
               <Icon
                 name={showNext ? 'eye-off-outline' : 'eye-outline'}
                 size={20}
@@ -131,9 +169,15 @@ export default function PasswordChangeSheet({ visible, onClose }: Props) {
           placeholder={t('settings.passwordSheet.confirmPlaceholder')}
           secureTextEntry={!showConfirm}
           autoCapitalize="none"
-          error={Boolean(mismatch)}
+          error={Boolean(confirmError)}
+          errorMessage={confirmError ?? undefined}
           rightAccessory={
-            <Pressable onPress={() => setShowConfirm((v) => !v)} hitSlop={10}>
+            <Pressable
+              onPress={() => setShowConfirm((v) => !v)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel={t(showConfirm ? 'login.hide' : 'login.show')}
+            >
               <Icon
                 name={showConfirm ? 'eye-off-outline' : 'eye-outline'}
                 size={20}
@@ -143,8 +187,6 @@ export default function PasswordChangeSheet({ visible, onClose }: Props) {
           }
         />
       </Field>
-
-      {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
 
       <Button
         title={
@@ -183,13 +225,6 @@ function makeStyles(c: Colors) {
       color: c.labelSecondary,
       textTransform: 'uppercase',
       letterSpacing: 0.5,
-      marginLeft: 4,
-    },
-    error: {
-      fontFamily: font('600'),
-      fontSize: 13,
-      fontWeight: '600',
-      color: c.danger,
       marginLeft: 4,
     },
   })

@@ -43,12 +43,13 @@ export function validateEmail(value: string, opts?: { required?: boolean }): Ema
 
 export function validatePassword(value: string, opts?: { required?: boolean }): PasswordErrorKey | null {
   const required = opts?.required ?? false
-  const trimmed = value.trim()
-  if (!trimmed) return required ? 'passwordRequired' : null
-  if (trimmed.length < 8) return 'passwordMin'
-  if (trimmed.length > INPUT_LIMITS.password) return 'passwordMin'
-  if (COMMON_PASSWORDS.has(trimmed.toLowerCase())) return 'passwordTooCommon'
-  if (!/[a-z]/i.test(trimmed) || !/\d/.test(trimmed)) return 'passwordLetterNumber'
+  // Passwords are opaque values: validate the exact string that is sent to
+  // the API instead of silently trimming it and checking a different value.
+  if (!value) return required ? 'passwordRequired' : null
+  if (value.length < 8) return 'passwordMin'
+  if (value.length > INPUT_LIMITS.password) return 'passwordMin'
+  if (COMMON_PASSWORDS.has(value.toLowerCase())) return 'passwordTooCommon'
+  if (!/[a-z]/i.test(value) || !/\d/.test(value)) return 'passwordLetterNumber'
   return null
 }
 

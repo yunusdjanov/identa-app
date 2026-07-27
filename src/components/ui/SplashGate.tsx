@@ -14,6 +14,7 @@ import Brand from './Brand'
 import { useAuthStore } from '../../stores/auth'
 import { useThemeStore } from '../../stores/theme'
 import { useColors } from '../../lib/useColors'
+import { useI18n } from '../../i18n'
 
 interface Props {
   children: React.ReactNode
@@ -29,6 +30,7 @@ export default function SplashGate({ children }: Props) {
   const hydrate = useAuthStore((s) => s.hydrate)
   const themeHydrating = useThemeStore((s) => s.isHydrating)
   const hydrateTheme = useThemeStore((s) => s.hydrate)
+  const { isHydrating: localeHydrating } = useI18n()
 
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
@@ -45,7 +47,7 @@ export default function SplashGate({ children }: Props) {
 
   // On iOS we don't need to wait for Inter — System (SF Pro) is built-in.
   const waitingForFonts = Platform.OS !== 'ios' && !fontsLoaded
-  const ready = !isHydrating && !waitingForFonts && !themeHydrating
+  const ready = !isHydrating && !waitingForFonts && !themeHydrating && !localeHydrating
 
   const [showSplash, setShowSplash] = useState(true)
   const splashOpacity = useRef(new Animated.Value(1)).current

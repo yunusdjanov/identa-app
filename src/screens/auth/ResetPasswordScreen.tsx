@@ -19,14 +19,17 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import * as Haptics from 'expo-haptics'
 
 import Button from '../../components/ui/Button'
+import InputCard from '../../components/ui/InputCard'
 import PasswordInput from '../../components/ui/PasswordInput'
 import Icon from '../../components/ui/Icon'
+import LanguageSwitcher from '../../components/ui/LanguageSwitcher'
 import { useToast } from '../../components/ui/Toast'
 
 import { spacing, typography, radius } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import { useI18n } from '../../i18n'
-import { validatePassword } from '../../lib/validation'
+import { INPUT_LIMITS, validateEmail, validatePassword } from '../../lib/validation'
+import { getAuthErrorMessage } from '../../lib/authErrorMessage'
 import { resetPassword } from '../../api/auth'
 import { isApiError } from '../../api/client'
 import type { AuthStackParams } from '../../navigation'
@@ -45,24 +48,38 @@ export default function ResetPasswordScreen() {
   // token + email arrive from the password-reset deep link
   // (identa://reset-password?token=…&email=…).
   const token = route.params?.token ?? ''
-  const email = route.params?.email ?? ''
-  const linkValid = token.length > 0 && email.length > 0
+  const linkValid = token.trim().length > 0
 
+  const [email, setEmail] = useState(route.params?.email ?? '')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [submitted, setSubmitted] = useState(false)
 
+  const emailKey = submitted ? validateEmail(email, { required: true }) : null
+  const emailError = emailKey ? t(`login.errors.${emailKey}`) : null
   const pwKey = submitted ? validatePassword(password, { required: true }) : null
-  const pwError = pwKey ? t(`register.errors.${pwKey}`) : null
+  const pwError = pwKey
+    ? pwKey === 'passwordRequired'
+      ? t('login.errors.passwordRequired')
+      : t(`register.errors.${pwKey}`)
+    : null
   const confirmError =
-    submitted && confirm !== password ? t('resetPassword.mismatch') : null
+    submitted && !confirm
+      ? t('register.errors.passwordConfirmRequired')
+      : submitted && confirm !== password
+        ? t('resetPassword.mismatch')
+        : null
+
+  const goToLogin = () => {
+    navigation.reset({ index: 0, routes: [{ name: 'Login', params: { initialEmail: email.trim() } }] })
+  }
 
   const mutation = useMutation({
-    mutationFn: () => resetPassword(token, email, password, confirm),
+    mutationFn: () => resetPassword(token, email.trim(), password, confirm),
     onSuccess: () => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       toast.success(t('resetPassword.success'))
-      navigation.navigate('Login')
+      goToLogin()
     },
     onError: (err) => {
       // Surface the backend's field error (e.g. invalid/expired token) when
@@ -71,7 +88,7 @@ export default function ResetPasswordScreen() {
         isApiError(err) && err.fieldErrors
           ? Object.values(err.fieldErrors)[0]?.[0]
           : undefined
-      toast.error(fieldMsg ?? t('resetPassword.failed'))
+      toast.error(fieldMsg ?? getAuthErrorMessage(err, t, 'resetPassword.failed'))
     },
   })
 
@@ -82,7 +99,12 @@ export default function ResetPasswordScreen() {
       toast.error(t('resetPassword.invalidLink'))
       return
     }
-    if (validatePassword(password, { required: true }) || confirm !== password) {
+    if (
+      validateEmail(email, { required: true }) ||
+      validatePassword(password, { required: true }) ||
+      !confirm ||
+      confirm !== password
+    ) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
       return
     }
@@ -91,7 +113,7 @@ export default function ResetPasswordScreen() {
 
   const onBack = () => {
     Haptics.selectionAsync()
-    navigation.navigate('Login')
+    goToLogin()
   }
 
   return (
@@ -106,11 +128,17 @@ export default function ResetPasswordScreen() {
         <StatusBar barStyle="dark-content" />
 
         <View style={styles.navBar}>
-          <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
+          <Pressable
+            onPress={onBack}
+            hitSlop={12}
+            style={styles.backBtn}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.back')}
+          >
             <Icon name="chevron-back" size={26} color={c.brand as string} />
             <Text style={styles.backText}>{t('common.back')}</Text>
           </Pressable>
-          <View />
+          <LanguageSwitcher variant="minimal" />
         </View>
 
         <KeyboardAvoidingView
@@ -135,14 +163,37 @@ export default function ResetPasswordScreen() {
 
               {linkValid ? (
                 <View style={styles.formBlock}>
+                  <InputCard
+                    iconName="mail-outline"
+                    placeholder={t('login.emailPlaceholder')}
+                    value={email}
+                    onChangeText={setEmail}
+                    accessibilityLabel={t('login.email')}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    autoCorrect={false}
+                    textContentType="emailAddress"
+                    maxLength={INPUT_LIMITS.email}
+                    error={Boolean(emailError)}
+                    errorMessage={emailError}
+                  />
+                  {emailError ? (
+                    <Text style={styles.errorText} accessibilityRole="alert">
+                      {emailError}
+                    </Text>
+                  ) : null}
                   <PasswordInput
                     label={t('resetPassword.newPassword')}
                     placeholder={t('resetPassword.newPassword')}
                     value={password}
                     onChangeText={setPassword}
                     error={pwError}
+                    accessibilityLabel={t('resetPassword.newPassword')}
+                    showLabel={t('login.show')}
+                    hideLabel={t('login.hide')}
                     returnKeyType="next"
-                    maxLength={255}
+                    maxLength={INPUT_LIMITS.password}
                   />
                   <PasswordInput
                     label={t('resetPassword.confirmPassword')}
@@ -150,9 +201,12 @@ export default function ResetPasswordScreen() {
                     value={confirm}
                     onChangeText={setConfirm}
                     error={confirmError}
+                    accessibilityLabel={t('resetPassword.confirmPassword')}
+                    showLabel={t('login.show')}
+                    hideLabel={t('login.hide')}
                     returnKeyType="done"
                     onSubmitEditing={handleSubmit}
-                    maxLength={255}
+                    maxLength={INPUT_LIMITS.password}
                   />
 
                   <Button
@@ -228,6 +282,12 @@ function makeStyles(c: Colors) {
     },
     formBlock: {
       gap: spacing.md,
+    },
+    errorText: {
+      ...typography.footnote,
+      color: c.danger,
+      marginLeft: spacing.lg,
+      marginTop: -spacing.xs,
     },
   })
 }

@@ -1,65 +1,88 @@
 import React from 'react'
-import { View, StyleSheet } from 'react-native'
-import DayMiniCard from './DayMiniCard'
+import { StyleSheet, View } from 'react-native'
+
+import DayMiniCard, { PLANNER_CARD_HEIGHT } from './DayMiniCard'
 import { addDays, toLocalDateKey } from '../../lib/format'
 import { spacing } from '../../constants/theme'
 import type { ApiAppointment } from '../../types'
 
 interface Props {
-  weekStart: Date  // Monday-aligned
+  weekStart: Date
   appointmentsByDate: Map<string, ApiAppointment[]>
   onSelectDay: (date: Date) => void
 }
 
-// Planner-style 2-column grid of 7 day cards (Mon–Sun).
-// Tap a card → switch to that day in day-mode view.
+export const PLANNER_GRID_SIDE_INSET = 4
+export const PLANNER_COLUMN_GAP = 3
+export const PLANNER_ROW_GAP = 4
+
 export default function WeekGridView({ weekStart, appointmentsByDate, onSelectDay }: Props) {
+  const styles = stylesStatic
   const days = React.useMemo(
-    () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
+    () => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)),
     [weekStart]
   )
 
-  // Pair days into 2-column rows
-  const rows: Date[][] = []
-  for (let i = 0; i < days.length; i += 2) {
-    rows.push(days.slice(i, i + 2))
+  const dayCard = (date: Date, side: 'left' | 'right') => {
+    const key = toLocalDateKey(date)
+    return (
+      <DayMiniCard
+        key={key}
+        date={date}
+        appointments={appointmentsByDate.get(key) ?? []}
+        onPress={() => onSelectDay(date)}
+        side={side}
+      />
+    )
   }
 
+  const rows: Array<[Date, Date | null]> = [
+    [days[0], days[1]],
+    [days[2], days[3]],
+    [days[4], days[5]],
+    [days[6], null],
+  ]
+
   return (
-    <View style={styles.grid}>
-      {rows.map((row, idx) => (
-        <View key={idx} style={styles.row}>
-          {row.map((date) => {
-            const key = toLocalDateKey(date)
-            const appts = appointmentsByDate.get(key) ?? []
-            return (
-              <DayMiniCard
-                key={key}
-                date={date}
-                appointments={appts}
-                onPress={() => onSelectDay(date)}
-              />
-            )
-          })}
-          {row.length === 1 ? <View style={styles.placeholder} /> : null}
-        </View>
-      ))}
+    <View style={styles.frame}>
+      <View style={styles.grid} testID="week-grid">
+        {rows.map(([left, right], index) => (
+          <View key={toLocalDateKey(left)} style={styles.row} testID={`week-grid-row-${index + 1}`}>
+            {dayCard(left, 'left')}
+            {right ? (
+              dayCard(right, 'right')
+            ) : (
+              <View style={styles.emptyCell} testID="weekly-planner-empty-cell" />
+            )}
+          </View>
+        ))}
+      </View>
     </View>
   )
 }
 
-const styles = StyleSheet.create({
+const stylesStatic = StyleSheet.create({
+  frame: {
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
+  },
   grid: {
-    paddingHorizontal: spacing.lg,
-    gap: 12,
-    paddingTop: spacing.sm,
+    marginHorizontal: PLANNER_GRID_SIDE_INSET,
+    paddingHorizontal: 0,
+    paddingTop: spacing.xs,
     paddingBottom: 120,
+    gap: PLANNER_ROW_GAP,
   },
   row: {
+    height: PLANNER_CARD_HEIGHT,
     flexDirection: 'row',
-    gap: 12,
+    alignItems: 'stretch',
+    columnGap: PLANNER_COLUMN_GAP,
   },
-  placeholder: {
+  emptyCell: {
     flex: 1,
+    minWidth: 0,
+    height: PLANNER_CARD_HEIGHT,
   },
 })

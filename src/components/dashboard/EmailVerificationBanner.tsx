@@ -52,6 +52,9 @@ export default function EmailVerificationBanner() {
         }}
         hitSlop={8}
         style={styles.action}
+        accessibilityRole="button"
+        accessibilityLabel={t('emailVerify.resend')}
+        accessibilityState={{ disabled: mutation.isPending, busy: mutation.isPending }}
       >
         {mutation.isPending ? (
           <ActivityIndicator size="small" color={c.warning as string} />

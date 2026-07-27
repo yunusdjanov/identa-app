@@ -7,7 +7,7 @@ import {
   StyleSheet,
   Pressable,
 } from 'react-native'
-import { typography } from '../../constants/theme'
+import { font, inputMetrics } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 
 interface Props extends TextInputProps {
@@ -41,6 +41,7 @@ const FormRow = forwardRef<TextInput, Props>(function FormRow(
           onBlur?.(e)
         }}
         {...rest}
+        accessibilityLabel={rest.accessibilityLabel ?? rest.placeholder}
       />
       {rightAccessory ? <View style={styles.rightWrap}>{rightAccessory}</View> : null}
     </View>
@@ -54,21 +55,23 @@ function makeStyles(c: Colors) {
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 54,
-    paddingHorizontal: 16,
+    minHeight: inputMetrics.height,
+    paddingHorizontal: inputMetrics.paddingHorizontal,
   },
   iconWrap: {
-    width: 24,
-    height: 24,
-    marginRight: 12,
+    width: inputMetrics.iconBoxSize,
+    height: inputMetrics.iconBoxSize,
+    marginRight: inputMetrics.contentGap,
     alignItems: 'center',
     justifyContent: 'center',
   },
   input: {
     flex: 1,
-    ...typography.body,
+    fontFamily: font('400'),
+    fontSize: inputMetrics.fontSize,
+    lineHeight: inputMetrics.lineHeight,
     color: c.label,
-    paddingVertical: 16,
+    paddingVertical: 10,
   },
   rightWrap: { marginLeft: 8 },
   })

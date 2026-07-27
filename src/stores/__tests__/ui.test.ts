@@ -8,6 +8,7 @@ describe('useUIStore', () => {
       patientFormOpen: false,
       patientFormId: null,
       pendingAppointmentsViewDate: null,
+      pendingAppointmentsViewId: null,
     } as any)
   })
 
@@ -85,6 +86,23 @@ describe('useUIStore', () => {
       useUIStore.getState().requestAppointmentsViewDate('2026-05-30')
       useUIStore.getState().clearAppointmentsViewDate()
       expect(useUIStore.getState().pendingAppointmentsViewDate).toBeNull()
+    })
+
+    it('records a specific appointment detail request', () => {
+      useUIStore
+        .getState()
+        .requestAppointmentsViewAppointment('2026-05-30', 'appointment-1')
+
+      expect(useUIStore.getState()).toMatchObject({
+        pendingAppointmentsViewDate: '2026-05-30',
+        pendingAppointmentsViewId: 'appointment-1',
+      })
+
+      useUIStore.getState().clearAppointmentsViewRequest()
+      expect(useUIStore.getState()).toMatchObject({
+        pendingAppointmentsViewDate: null,
+        pendingAppointmentsViewId: null,
+      })
     })
   })
 })

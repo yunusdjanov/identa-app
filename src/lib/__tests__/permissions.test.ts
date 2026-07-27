@@ -1,4 +1,12 @@
-import { canView, canManage, isSubscriptionReadOnly } from '../permissions'
+import {
+  canView,
+  canManage,
+  canExportData,
+  isSubscriptionReadOnly,
+  mustRotatePassword,
+  toggleAssistantPermission,
+  DEFAULT_ASSISTANT_PERMISSIONS,
+} from '../permissions'
 import type { ApiUser } from '../../types'
 
 const dentist: ApiUser = {
@@ -117,5 +125,63 @@ describe('isSubscriptionReadOnly', () => {
       },
     }
     expect(isSubscriptionReadOnly(u)).toBe(true)
+  })
+})
+
+describe('canExportData', () => {
+  it('fails closed when the subscription feature flag is missing', () => {
+    expect(canExportData(dentist)).toBe(false)
+  })
+
+  it('allows an explicit plan grant', () => {
+    expect(canExportData({
+      ...dentist,
+      subscription: {
+        is_configured: true,
+        plan: 'pro',
+        status: 'active',
+        access_mode: 'full',
+        days_remaining: 20,
+        staff_limit: 5,
+        active_staff_count: 1,
+        can_export: true,
+      },
+    })).toBe(true)
+  })
+
+  it('keeps administrators exempt from subscription feature flags', () => {
+    expect(canExportData(admin)).toBe(true)
+  })
+})
+
+describe('mustRotatePassword', () => {
+  it('locks an active account flagged by the backend', () => {
+    expect(mustRotatePassword({ ...assistant([]), must_change_password: true })).toBe(true)
+  })
+
+  it('does not lock ordinary or inactive accounts', () => {
+    expect(mustRotatePassword(dentist)).toBe(false)
+    expect(mustRotatePassword({ ...blocked(dentist), must_change_password: true })).toBe(false)
+    expect(mustRotatePassword(null)).toBe(false)
+  })
+})
+
+describe('assistant permission form parity', () => {
+  it('starts new assistants with no access until the owner grants it', () => {
+    expect(DEFAULT_ASSISTANT_PERMISSIONS).toEqual([])
+  })
+
+  it('adds the required view permission when manage is enabled', () => {
+    expect(toggleAssistantPermission([], 'patients.manage')).toEqual([
+      'patients.view',
+      'patients.manage',
+    ])
+  })
+
+  it('removes manage when its view permission is disabled', () => {
+    expect(toggleAssistantPermission(
+      ['patients.view', 'patients.manage', 'payments.view'],
+      'patients.view'
+    )).toEqual(['payments.view'])
   })
 })

@@ -3,6 +3,30 @@ import type { ApiUser } from '../types'
 export type PermissionModule = 'patients' | 'appointments' | 'payments'
 export type PermissionAction = 'view' | 'manage'
 
+export const STAFF_PERMISSION_CODES = [
+  'patients.view',
+  'patients.manage',
+  'appointments.view',
+  'appointments.manage',
+  'payments.view',
+  'payments.manage',
+] as const
+
+export type StaffPermission = (typeof STAFF_PERMISSION_CODES)[number]
+export const DEFAULT_ASSISTANT_PERMISSIONS: StaffPermission[] = []
+
+const MANAGE_TO_VIEW: Partial<Record<StaffPermission, StaffPermission>> = {
+  'patients.manage': 'patients.view',
+  'appointments.manage': 'appointments.view',
+  'payments.manage': 'payments.view',
+}
+
+const VIEW_TO_MANAGE: Partial<Record<StaffPermission, StaffPermission>> = {
+  'patients.view': 'patients.manage',
+  'appointments.view': 'appointments.manage',
+  'payments.view': 'payments.manage',
+}
+
 // Mirrors web `lib/auth/permissions.ts`.
 // - Dentist & admin: full access (subject to subscription + account status).
 // - Assistant: granular `assistant_permissions` array like ['patients.view', ...].
@@ -48,6 +72,45 @@ export function canManage(user: ApiUser | null, module: PermissionModule): boole
   if (user.role === 'admin' || user.role === 'dentist') return true
   if (user.role === 'assistant') return hasAssistantPermission(user, module, 'manage')
   return false
+}
+
+/** Mirrors the web shell's forced password-rotation navigation lock. */
+export function mustRotatePassword(user: ApiUser | null): boolean {
+  return user?.account_status === 'active' && user.must_change_password === true
+}
+
+/** Keeps assistant view/manage dependencies identical to the web form. */
+export function toggleAssistantPermission(
+  current: readonly string[],
+  permission: StaffPermission
+): StaffPermission[] {
+  const selected = new Set<StaffPermission>(
+    current.filter((value): value is StaffPermission =>
+      (STAFF_PERMISSION_CODES as readonly string[]).includes(value)
+    )
+  )
+
+  if (selected.has(permission)) {
+    selected.delete(permission)
+    const dependentManage = VIEW_TO_MANAGE[permission]
+    if (dependentManage) selected.delete(dependentManage)
+  } else {
+    selected.add(permission)
+    const requiredView = MANAGE_TO_VIEW[permission]
+    if (requiredView) selected.add(requiredView)
+  }
+
+  return STAFF_PERMISSION_CODES.filter((code) => selected.has(code))
+}
+
+/**
+ * Export is generated entirely on-device, so it must fail closed when the
+ * server subscription summary does not explicitly grant the feature.
+ */
+export function canExportData(user: ApiUser | null): boolean {
+  if (!user || !isAccountUsable(user)) return false
+  if (user.role === 'admin') return true
+  return user.subscription?.can_export === true
 }
 
 // Analytics aggregates patients/appointments/payments — visible if ANY of those

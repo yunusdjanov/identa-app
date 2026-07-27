@@ -112,6 +112,8 @@ export default function FinanceCard({
       <Pressable
         onPress={handlePress}
         style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${value} ${unit}`}
       >
         {Inner}
       </Pressable>

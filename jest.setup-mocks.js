@@ -86,16 +86,6 @@ jest.mock('expo-image-picker', () => ({
   launchImageLibraryAsync: jest.fn(() => Promise.resolve({ canceled: true })),
 }))
 
-jest.mock('expo-notifications', () => ({
-  setNotificationHandler: jest.fn(),
-  requestPermissionsAsync: jest.fn(() => Promise.resolve({ granted: false })),
-  getPermissionsAsync: jest.fn(() => Promise.resolve({ granted: false })),
-  scheduleNotificationAsync: jest.fn(() => Promise.resolve('id')),
-  cancelScheduledNotificationAsync: jest.fn(() => Promise.resolve()),
-  getExpoPushTokenAsync: jest.fn(() => Promise.resolve({ data: 'mock-token' })),
-  AndroidImportance: { DEFAULT: 3, HIGH: 4 },
-}))
-
 jest.mock('expo-device', () => ({
   isDevice: true,
   deviceName: 'Test Device',

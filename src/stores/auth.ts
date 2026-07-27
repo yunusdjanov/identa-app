@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import * as SecureStore from 'expo-secure-store'
 import type { ApiUser } from '../types'
 import { setSentryUser } from '../lib/sentry'
+import { clearProtectedPatientPhotoCache } from '../lib/protectedPatientPhoto'
+import { clearSessionQueryCache } from '../lib/sessionQueryCache'
 
 const STORAGE_KEY = 'identa.session'
 
@@ -27,8 +29,9 @@ interface AuthState {
   user: ApiUser | null
   tokens: AuthTokens | null
   isAuthenticated: boolean
+  isSessionPersistent: boolean
   isHydrating: boolean
-  setSession: (user: ApiUser, tokens: AuthTokens) => void
+  setSession: (user: ApiUser, tokens: AuthTokens, persistSession?: boolean) => void
   // Replace user without changing tokens — used after /auth/me refetch or
   // profile updates.
   setUser: (user: ApiUser) => void
@@ -49,34 +52,68 @@ function persist(session: PersistedSession | null): void {
   SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(session)).catch(() => {})
 }
 
+function accessScopeFingerprint(user: ApiUser): string {
+  return JSON.stringify({
+    id: user.id,
+    role: user.role,
+    accountStatus: user.account_status,
+    ownerId: user.dentist_owner_id ?? null,
+    mustChangePassword: Boolean(user.must_change_password),
+    permissions: [...(user.assistant_permissions ?? [])].sort(),
+    subscriptionStatus: user.subscription?.status ?? null,
+    subscriptionAccess: user.subscription?.access_mode ?? null,
+    canExport: user.subscription?.can_export ?? null,
+  })
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   tokens: null,
   isAuthenticated: false,
+  isSessionPersistent: false,
   isHydrating: true,
-  setSession: (user, tokens) => {
-    persist({ user, tokens })
+  setSession: (user, tokens, persistSession = true) => {
+    clearSessionQueryCache()
+    clearProtectedPatientPhotoCache().catch(() => {})
+    persist(persistSession ? { user, tokens } : null)
     // Tag Sentry events with the user id (no name/email — see sentry.ts).
     setSentryUser(user.id)
-    set({ user, tokens, isAuthenticated: true, isHydrating: false })
+    set({
+      user,
+      tokens,
+      isAuthenticated: true,
+      isSessionPersistent: persistSession,
+      isHydrating: false,
+    })
   },
   setUser: (user) => {
-    const { tokens } = get()
-    if (tokens) persist({ user, tokens })
+    const { user: currentUser, tokens, isSessionPersistent } = get()
+    if (!currentUser || accessScopeFingerprint(currentUser) !== accessScopeFingerprint(user)) {
+      clearSessionQueryCache()
+    }
+    if (tokens && isSessionPersistent) persist({ user, tokens })
     setSentryUser(user.id)
     set({ user, isAuthenticated: true, isHydrating: false })
   },
   setTokens: (tokens) => {
-    const { user } = get()
-    if (user) persist({ user, tokens })
+    const { user, isSessionPersistent } = get()
+    if (user && isSessionPersistent) persist({ user, tokens })
     set({ tokens })
   },
   logout: () => {
+    clearSessionQueryCache()
+    clearProtectedPatientPhotoCache().catch(() => {})
     persist(null)
     // Clear user context so events captured after sign-out don't get
     // mis-attributed to the previous account.
     setSentryUser(null)
-    set({ user: null, tokens: null, isAuthenticated: false, isHydrating: false })
+    set({
+      user: null,
+      tokens: null,
+      isAuthenticated: false,
+      isSessionPersistent: false,
+      isHydrating: false,
+    })
   },
   hydrate: async () => {
     try {
@@ -92,6 +129,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             user: parsed.user,
             tokens: parsed.tokens,
             isAuthenticated: true,
+            isSessionPersistent: true,
             isHydrating: false,
           })
           return

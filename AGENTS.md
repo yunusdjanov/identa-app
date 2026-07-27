@@ -15,7 +15,7 @@ older Expo answers from training data are usually wrong for SDK 54.
 
 - Expo `~54`, React Native `0.81`, React `19`, TypeScript `~5.9`
 - React Navigation v7 (`native-stack` + `bottom-tabs`) — **not** expo-router
-- TanStack React Query v5, persisted to AsyncStorage (offline cache)
+- TanStack React Query v5, in-memory per authenticated session
 - Zustand v5 for client state (`src/stores`: auth, ui, network)
 - axios for HTTP; `@sentry/react-native` for crash reporting
 - `expo-secure-store` (session), `expo-image-picker`, `expo-notifications`,
@@ -81,6 +81,6 @@ EAS builds: `npm run build:prod:android` (app-bundle) /
 - Errors: the API layer normalizes everything to `ApiError { kind }`
   (`src/api/client.ts`). Branch on `kind`, never on raw axios shapes.
 - Money is UZS **integers** (no minor units). Dates `YYYY-MM-DD`, times `HH:mm`.
-- Bump the query-cache key suffix in `App.tsx` (`@identa/query-cache-vN`) whenever
-  a response mapper changes shape — otherwise persisted cache hydrates stale rows.
+- Do not persist clinical or financial React Query data to AsyncStorage. Session
+  changes and authorization-scope changes must clear the in-memory query cache.
 - Default locale is `ru`.

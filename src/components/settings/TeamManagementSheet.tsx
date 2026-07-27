@@ -1,13 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { View, Text, StyleSheet, Pressable } from 'react-native'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { ActivityIndicator, View, Text, StyleSheet, Pressable } from 'react-native'
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 
 import BottomSheet from '../ui/BottomSheet'
 import InputCard from '../ui/InputCard'
 import PasswordInput from '../ui/PasswordInput'
 import Button from '../ui/Button'
-import Icon from '../ui/Icon'
+import Icon, { type IconName } from '../ui/Icon'
 import PatientAvatar from '../ui/PatientAvatar'
 import EmptyState from '../ui/EmptyState'
 import { useToast } from '../ui/Toast'
@@ -21,29 +21,31 @@ import {
   resetAssistantPassword,
   deleteAssistant,
 } from '../../api/team'
-import { validatePassword } from '../../lib/validation'
+import { INPUT_LIMITS, validateEmail, validatePassword } from '../../lib/validation'
 import { useI18n } from '../../i18n'
 import type { TFunction } from '../../i18n/helpers'
 import { radius, spacing, typography, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import { isOfflineError } from '../../lib/offlineGuard'
 import { getRelativeDateBucket } from '../../lib/format'
-import { applyPhoneInput, formatStoredPhone } from '../../lib/phoneFormat'
+import { applyPhoneInput, formatStoredPhone, isValidUzbekPhone } from '../../lib/phoneFormat'
+import {
+  DEFAULT_ASSISTANT_PERMISSIONS,
+  isSubscriptionReadOnly,
+  STAFF_PERMISSION_CODES,
+  toggleAssistantPermission,
+  type StaffPermission,
+} from '../../lib/permissions'
+import { useAuthStore } from '../../stores/auth'
 import type { ApiAssistant } from '../../types'
+import { useSettingsFormDismiss } from './useSettingsFormDismiss'
+
+const TEAM_PAGE_SIZE = 20
 
 interface Props {
   visible: boolean
   onClose: () => void
 }
-
-const ALL_PERMISSIONS = [
-  'patients.view',
-  'patients.manage',
-  'appointments.view',
-  'appointments.manage',
-  'payments.view',
-  'payments.manage',
-] as const
 
 type Mode =
   | { type: 'list' }
@@ -57,6 +59,11 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
   const toast = useToast()
   const { confirm } = useDialog()
   const queryClient = useQueryClient()
+  const user = useAuthStore((state) => state.user)
+  const isReadOnly = isSubscriptionReadOnly(user)
+  const staffLimit = user?.subscription?.staff_limit ?? null
+  const activeStaffCount = user?.subscription?.active_staff_count ?? 0
+  const isAtStaffLimit = staffLimit !== null && activeStaffCount >= staffLimit
 
   const [mode, setMode] = useState<Mode>({ type: 'list' })
 
@@ -65,20 +72,33 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
-  const [permissions, setPermissions] = useState<string[]>([])
+  const [permissions, setPermissions] = useState<string[]>(DEFAULT_ASSISTANT_PERMISSIONS)
+  const [formSubmitted, setFormSubmitted] = useState(false)
+  const initialFormValues = useRef('')
 
   // Reset-password form state (separate `resetPassword` mode).
   const [resetPw, setResetPw] = useState('')
   const [resetPwConfirm, setResetPwConfirm] = useState('')
   const [resetSubmitted, setResetSubmitted] = useState(false)
 
-  const listQuery = useQuery({
+  const listQuery = useInfiniteQuery({
     queryKey: ['team', 'list'],
-    queryFn: listAssistants,
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => listAssistants(pageParam, TEAM_PAGE_SIZE),
+    getNextPageParam: (lastPage) => {
+      const pagination = lastPage.meta.pagination
+      const currentPage = pagination.page ?? pagination.current_page ?? 1
+      const totalPages = pagination.total_pages ?? pagination.last_page ?? 1
+      return currentPage < totalPages ? currentPage + 1 : undefined
+    },
     enabled: visible,
     staleTime: 30_000,
   })
-  const members = listQuery.data?.data ?? []
+  const members = useMemo(
+    () => (listQuery.data?.pages.flatMap((page) => page.data) ?? [])
+      .filter((member) => member.account_status !== 'deleted'),
+    [listQuery.data]
+  )
 
   // Reset to list when sheet closes
   useEffect(() => {
@@ -93,34 +113,59 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
     setEmail('')
     setPhone('')
     setPassword('')
-    setPermissions([])
+    setPermissions([...DEFAULT_ASSISTANT_PERMISSIONS])
+    setFormSubmitted(false)
+    initialFormValues.current = ''
   }
 
   const openCreate = () => {
+    if (isReadOnly || isAtStaffLimit) return
     Haptics.selectionAsync()
-    resetForm()
+    const nextPermissions = [...DEFAULT_ASSISTANT_PERMISSIONS]
+    setName('')
+    setEmail('')
+    setPhone('')
+    setPassword('')
+    setPermissions(nextPermissions)
+    setFormSubmitted(false)
+    initialFormValues.current = JSON.stringify({
+      name: '',
+      email: '',
+      phone: '',
+      password: '',
+      permissions: nextPermissions,
+    })
     setMode({ type: 'form', editingId: null })
   }
 
   const openEdit = (m: ApiAssistant) => {
+    if (isReadOnly) return
     Haptics.selectionAsync()
     setName(m.name)
     setEmail(m.email)
     setPhone(formatStoredPhone(m.phone))
     setPassword('')
-    setPermissions(m.assistant_permissions ?? [])
+    const nextPermissions = m.assistant_permissions ?? []
+    setPermissions(nextPermissions)
+    setFormSubmitted(false)
+    initialFormValues.current = JSON.stringify({
+      name: m.name,
+      email: m.email,
+      phone: formatStoredPhone(m.phone),
+      password: '',
+      permissions: nextPermissions,
+    })
     setMode({ type: 'form', editingId: m.id })
   }
 
-  const togglePerm = (p: string) => {
+  const togglePerm = (p: StaffPermission) => {
     Haptics.selectionAsync()
-    setPermissions((prev) =>
-      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]
-    )
+    setPermissions((prev) => toggleAssistantPermission(prev, p))
   }
 
   const refetch = () => {
     queryClient.invalidateQueries({ queryKey: ['team'] })
+    queryClient.invalidateQueries({ queryKey: ['auth', 'me'] })
   }
 
   const createMutation = useMutation({
@@ -128,7 +173,7 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
       createAssistant({
         name: name.trim(),
         email: email.trim(),
-        phone: phone.trim() ? applyPhoneInput(phone).raw : undefined,
+        phone: phone.trim() ? applyPhoneInput(phone).raw : null,
         password,
         permissions,
       }),
@@ -195,12 +240,25 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
     },
   })
 
-  const onToggleStatus = (m: ApiAssistant) => {
+  const onToggleStatus = async (m: ApiAssistant): Promise<boolean> => {
     const next = m.account_status === 'blocked' ? 'active' : 'blocked'
+    if (isReadOnly || statusMutation.isPending) return false
+    if (next === 'active' && isAtStaffLimit) return false
+    if (next === 'blocked') {
+      const ok = await confirm({
+        title: t('settings.teamSheet.blockConfirm'),
+        message: t('settings.teamSheet.blockConfirmSub', { name: m.name }),
+        confirmLabel: t('settings.teamSheet.block'),
+        destructive: true,
+      })
+      if (!ok) return false
+    }
     statusMutation.mutate({ id: m.id, status: next })
+    return true
   }
 
   const openResetPassword = (m: ApiAssistant) => {
+    if (isReadOnly) return
     Haptics.selectionAsync()
     setResetPw('')
     setResetPwConfirm('')
@@ -242,28 +300,49 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
     }
   }
 
-  const onDelete = async (m: ApiAssistant) => {
+  const onDelete = async (m: ApiAssistant): Promise<boolean> => {
+    if (isReadOnly || deleteMutation.isPending) return false
     const ok = await confirm({
       title: t('settings.teamSheet.deleteConfirm'),
       message: t('settings.teamSheet.deleteConfirmSub'),
       confirmLabel: t('settings.teamSheet.delete'),
       destructive: true,
     })
-    if (ok) deleteMutation.mutate(m.id)
+    if (!ok) return false
+    deleteMutation.mutate(m.id)
+    return true
   }
 
   const isEditing = mode.type === 'form' && mode.editingId !== null
   const isFormMode = mode.type === 'form'
   const isResetMode = mode.type === 'resetPassword'
 
-  const canSubmit =
-    name.trim().length > 0 &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) &&
-    (isEditing || password.length >= 8)
-
+  const nameError = formSubmitted && (name.trim().length < 3 || name.trim().length > INPUT_LIMITS.personName)
+    ? t('register.errors.nameMin')
+    : null
+  const emailErrorKey = formSubmitted ? validateEmail(email, { required: true }) : null
+  const emailError = emailErrorKey ? t(`login.errors.${emailErrorKey}`) : null
+  const phoneError = formSubmitted && phone.trim() && !isValidUzbekPhone(phone)
+    ? t('settings.teamSheet.phoneInvalid')
+    : null
+  const passwordErrorKey = !isEditing && formSubmitted
+    ? validatePassword(password, { required: true })
+    : null
+  const passwordError = passwordErrorKey
+    ? passwordErrorKey === 'passwordRequired'
+      ? t('login.errors.passwordRequired')
+      : t(`register.errors.${passwordErrorKey}`)
+    : null
   const handleSubmit = () => {
-    if (!canSubmit) {
+    if (isReadOnly || (!isEditing && isAtStaffLimit)) return
+    setFormSubmitted(true)
+    const invalidName = name.trim().length < 3 || name.trim().length > INPUT_LIMITS.personName
+    const invalidEmail = validateEmail(email, { required: true }) !== null
+    const invalidPhone = Boolean(phone.trim()) && !isValidUzbekPhone(phone)
+    const invalidPassword = !isEditing && validatePassword(password, { required: true }) !== null
+    if (invalidName || invalidEmail || invalidPhone || invalidPassword) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+      toast.error(t('settings.teamSheet.fixErrors'))
       return
     }
     if (isEditing) updateMutation.mutate()
@@ -271,20 +350,40 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
   }
 
   const isPending = createMutation.isPending || updateMutation.isPending
+  const anyMutationPending =
+    isPending ||
+    resetPasswordMutation.isPending ||
+    deleteMutation.isPending ||
+    statusMutation.isPending
+  const isFormDirty =
+    isFormMode &&
+    initialFormValues.current !== JSON.stringify({
+      name,
+      email,
+      phone,
+      password,
+      permissions,
+    })
+  const canDismiss = useSettingsFormDismiss({
+    isDirty: isFormDirty,
+    isPending: anyMutationPending,
+  })
+  const sheetTitle =
+    mode.type === 'resetPassword'
+      ? t('settings.teamSheet.resetPasswordTitle')
+      : mode.type === 'form'
+        ? mode.editingId
+          ? t('settings.teamSheet.editTitle')
+          : t('settings.teamSheet.createTitle')
+        : t('settings.teamSheet.title')
 
   return (
     <BottomSheet
       visible={visible}
       onClose={onClose}
-      title={
-        isResetMode
-          ? t('settings.teamSheet.resetPasswordTitle')
-          : isFormMode
-            ? isEditing
-              ? t('settings.teamSheet.editTitle')
-              : t('settings.teamSheet.createTitle')
-            : t('settings.teamSheet.title')
-      }
+      onBeforeClose={canDismiss}
+      closeAccessibilityLabel={t('common.close')}
+      title={sheetTitle}
     >
       {isResetMode ? (
         <>
@@ -333,25 +432,35 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
       ) : isFormMode ? (
         <>
           <Field label={t('settings.teamSheet.name')}>
-            <InputCard
-              iconName="person-outline"
-              value={name}
-              onChangeText={setName}
-              placeholder={t('settings.teamSheet.namePlaceholder')}
-              autoCapitalize="words"
-            />
+            <>
+              <InputCard
+                iconName="person-outline"
+                value={name}
+                onChangeText={setName}
+                placeholder={t('settings.teamSheet.namePlaceholder')}
+                autoCapitalize="words"
+                maxLength={INPUT_LIMITS.personName}
+                error={Boolean(nameError)}
+              />
+              {nameError ? <Text style={styles.fieldError}>{nameError}</Text> : null}
+            </>
           </Field>
 
           <Field label={t('settings.teamSheet.email')}>
-            <InputCard
-              iconName="mail-outline"
-              value={email}
-              onChangeText={setEmail}
-              placeholder={t('settings.teamSheet.emailPlaceholder')}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+            <>
+              <InputCard
+                iconName="mail-outline"
+                value={email}
+                onChangeText={setEmail}
+                placeholder={t('settings.teamSheet.emailPlaceholder')}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={INPUT_LIMITS.email}
+                error={Boolean(emailError)}
+              />
+              {emailError ? <Text style={styles.fieldError}>{emailError}</Text> : null}
+            </>
           </Field>
 
           <Field label={t('settings.teamSheet.phone')}>
@@ -362,18 +471,18 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
               placeholder={t('settings.teamSheet.phonePlaceholder')}
               keyboardType="phone-pad"
               maxLength={17}
+              error={Boolean(phoneError)}
             />
+            {phoneError ? <Text style={styles.fieldError}>{phoneError}</Text> : null}
           </Field>
 
           {!isEditing ? (
             <Field label={t('settings.teamSheet.password')}>
-              <InputCard
-                iconName="key-outline"
+              <PasswordInput
                 value={password}
                 onChangeText={setPassword}
                 placeholder={t('settings.teamSheet.passwordPlaceholder')}
-                secureTextEntry
-                autoCapitalize="none"
+                error={passwordError}
               />
             </Field>
           ) : null}
@@ -382,7 +491,7 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
             <Text style={styles.fieldLabel}>{t('settings.teamSheet.permissions')}</Text>
             <Text style={styles.permsHint}>{t('settings.teamSheet.permissionsHint')}</Text>
             <View style={styles.permsList}>
-              {ALL_PERMISSIONS.map((p, idx) => {
+              {STAFF_PERMISSION_CODES.map((p, idx) => {
                 const checked = permissions.includes(p)
                 return (
                   <React.Fragment key={p}>
@@ -397,7 +506,7 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
                         ) : null}
                       </View>
                     </Pressable>
-                    {idx < ALL_PERMISSIONS.length - 1 ? <View style={styles.permSep} /> : null}
+                    {idx < STAFF_PERMISSION_CODES.length - 1 ? <View style={styles.permSep} /> : null}
                   </React.Fragment>
                 )
               })}
@@ -429,7 +538,7 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
               size="md"
               fullWidth
               loading={isPending}
-              disabled={!canSubmit}
+              disabled={isReadOnly || (!isEditing && isAtStaffLimit)}
               onPress={handleSubmit}
               style={{ flex: 1 }}
             />
@@ -444,9 +553,32 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
             fullWidth
             leftIcon={<Icon name="person-add-outline" size={18} color={c.brandDeep as string} />}
             onPress={openCreate}
+            disabled={isReadOnly || isAtStaffLimit}
           />
 
-          {members.length === 0 ? (
+          {listQuery.isLoading && !listQuery.data ? (
+            <View style={styles.loader}>
+              <ActivityIndicator
+                color={c.brand as string}
+                accessibilityLabel={t('common.loading')}
+              />
+            </View>
+          ) : listQuery.isError && !listQuery.data ? (
+            <EmptyState
+              iconName="cloud-offline-outline"
+              title={t('settings.teamSheet.loadFailed')}
+              subtitle={t('settings.teamSheet.loadFailedSub')}
+              tone="danger"
+              action={
+                <Button
+                  title={t('common.retry')}
+                  variant="secondary"
+                  size="md"
+                  onPress={() => listQuery.refetch()}
+                />
+              }
+            />
+          ) : members.length === 0 ? (
             <EmptyState
               iconName="people-outline"
               title={t('settings.teamSheet.empty')}
@@ -459,9 +591,16 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
                   <MemberRow
                     member={m}
                     onEdit={() => openEdit(m)}
-                    onDelete={() => onDelete(m)}
-                    onToggleStatus={() => onToggleStatus(m)}
                     onResetPassword={() => openResetPassword(m)}
+                    onToggleStatus={() => {
+                      void onToggleStatus(m)
+                    }}
+                    onDelete={() => {
+                      void onDelete(m)
+                    }}
+                    isReadOnly={isReadOnly}
+                    isAtStaffLimit={isAtStaffLimit}
+                    isPending={anyMutationPending}
                     t={t}
                   />
                   {idx < members.length - 1 ? <View style={styles.separator} /> : null}
@@ -469,6 +608,18 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
               ))}
             </View>
           )}
+          {members.length > 0 && (listQuery.hasNextPage || listQuery.isFetchNextPageError) ? (
+            <Button
+              title={listQuery.isFetchNextPageError
+                ? t('common.retry')
+                : t('settings.teamSheet.loadMore')}
+              variant="secondary"
+              size="md"
+              fullWidth
+              loading={listQuery.isFetchingNextPage}
+              onPress={() => listQuery.fetchNextPage()}
+            />
+          ) : null}
         </>
       )}
     </BottomSheet>
@@ -478,16 +629,22 @@ export default function TeamManagementSheet({ visible, onClose }: Props) {
 function MemberRow({
   member,
   onEdit,
-  onDelete,
-  onToggleStatus,
   onResetPassword,
+  onToggleStatus,
+  onDelete,
+  isReadOnly,
+  isAtStaffLimit,
+  isPending,
   t,
 }: {
   member: ApiAssistant
   onEdit: () => void
-  onDelete: () => void
-  onToggleStatus: () => void
   onResetPassword: () => void
+  onToggleStatus: () => void
+  onDelete: () => void
+  isReadOnly: boolean
+  isAtStaffLimit: boolean
+  isPending: boolean
   t: TFunction
 }) {
   const c = useColors()
@@ -496,63 +653,109 @@ function MemberRow({
     ? formatLastLogin(new Date(member.last_login_at), t)
     : t('settings.teamSheet.lastLoginNever')
   const isBlocked = member.account_status === 'blocked'
+  const writesDisabled = isReadOnly || isPending
 
   return (
-    <View style={styles.memberRow}>
-      <PatientAvatar name={member.name} size={42} />
-      <View style={styles.memberBody}>
-        <View style={styles.memberNameRow}>
-          <Text style={styles.memberName} numberOfLines={1}>
-            {member.name}
+    <View style={styles.memberRow} testID={`team-member-${member.id}`}>
+      <View
+        style={styles.memberSummary}
+        testID={`team-member-summary-${member.id}`}
+      >
+        <PatientAvatar name={member.name} size={42} />
+        <View style={styles.memberBody}>
+          <View style={styles.memberNameRow}>
+            <Text style={styles.memberName} numberOfLines={1}>
+              {member.name}
+            </Text>
+            {isBlocked ? (
+              <View style={styles.blockedBadge}>
+                <Text style={styles.blockedBadgeText}>
+                  {t('settings.teamSheet.status.blocked')}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={styles.memberEmail} numberOfLines={1}>
+            {member.email}
           </Text>
-          {isBlocked ? (
-            <View style={styles.blockedBadge}>
-              <Text style={styles.blockedBadgeText}>{t('settings.teamSheet.status.blocked')}</Text>
-            </View>
-          ) : null}
+          <Text style={styles.memberMeta} numberOfLines={1}>
+            {lastLoginLabel} · {member.assistant_permissions.length}{' '}
+            {t('settings.teamSheet.permissions').toLowerCase()}
+          </Text>
         </View>
-        <Text style={styles.memberEmail} numberOfLines={1}>
-          {member.email}
-        </Text>
-        <Text style={styles.memberMeta} numberOfLines={1}>
-          {lastLoginLabel} · {member.assistant_permissions.length} {t('settings.teamSheet.permissions').toLowerCase()}
-        </Text>
       </View>
-      <View style={styles.memberActions}>
-        <Pressable
-          onPress={() => {
-            Haptics.selectionAsync()
-            onToggleStatus()
-          }}
-          hitSlop={8}
-          style={styles.iconBtn}
-          accessibilityLabel={t(isBlocked ? 'settings.teamSheet.unblock' : 'settings.teamSheet.block')}
-        >
-          <Icon
-            name={isBlocked ? 'lock-open-outline' : 'ban-outline'}
-            size={18}
-            color={isBlocked ? (c.success as string) : (c.labelSecondary as string)}
-          />
-        </Pressable>
-        <Pressable
-          onPress={() => {
-            Haptics.selectionAsync()
-            onResetPassword()
-          }}
-          hitSlop={8}
-          style={styles.iconBtn}
-          accessibilityLabel={t('settings.teamSheet.resetPassword')}
-        >
-          <Icon name="key-outline" size={18} color={c.labelSecondary as string} />
-        </Pressable>
-        <Pressable onPress={onEdit} hitSlop={8} style={styles.iconBtn}>
-          <Icon name="create-outline" size={18} color={c.brand as string} />
-        </Pressable>
-        <Pressable onPress={onDelete} hitSlop={8} style={styles.iconBtn}>
-          <Icon name="trash-outline" size={18} color={c.danger as string} />
-        </Pressable>
+
+      <View
+        style={styles.memberActions}
+        testID={`team-member-actions-${member.id}`}
+      >
+        <MemberActionButton
+          iconName="create-outline"
+          iconColor={c.brand as string}
+          label={t('settings.teamSheet.editTitle')}
+          onPress={onEdit}
+          disabled={writesDisabled}
+        />
+        <MemberActionButton
+          iconName="key-outline"
+          iconColor={c.labelSecondary as string}
+          label={t('settings.teamSheet.resetPassword')}
+          onPress={onResetPassword}
+          disabled={writesDisabled}
+        />
+        <MemberActionButton
+          iconName={isBlocked ? 'lock-open-outline' : 'ban-outline'}
+          iconColor={isBlocked ? (c.success as string) : (c.warning as string)}
+          label={t(isBlocked ? 'settings.teamSheet.unblock' : 'settings.teamSheet.block')}
+          onPress={onToggleStatus}
+          disabled={writesDisabled || (isBlocked && isAtStaffLimit)}
+        />
+        <MemberActionButton
+          iconName="trash-outline"
+          iconColor={c.danger as string}
+          label={t('settings.teamSheet.delete')}
+          onPress={onDelete}
+          disabled={writesDisabled}
+        />
       </View>
     </View>
+  )
+}
+
+function MemberActionButton({
+  iconName,
+  iconColor,
+  label,
+  onPress,
+  disabled,
+}: {
+  iconName: IconName
+  iconColor: string
+  label: string
+  onPress: () => void
+  disabled: boolean
+}) {
+  const c = useColors()
+  const styles = useMemo(() => makeStyles(c), [c])
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={() => {
+        Haptics.selectionAsync()
+        onPress()
+      }}
+      style={({ pressed }) => [
+        styles.memberActionButton,
+        pressed && !disabled && styles.memberActionButtonPressed,
+        disabled && styles.memberActionButtonDisabled,
+      ]}
+    >
+      <Icon name={iconName} size={18} color={iconColor} />
+    </Pressable>
   )
 }
 
@@ -611,6 +814,11 @@ function makeStyles(c: Colors) {
       letterSpacing: 0.4,
       marginLeft: 4,
     },
+    fieldError: {
+      ...typography.footnote,
+      color: c.danger,
+      marginHorizontal: 4,
+    },
     permsSection: { gap: 6 },
     permsHint: {
       ...typography.footnote,
@@ -665,11 +873,19 @@ function makeStyles(c: Colors) {
       borderRadius: radius.xl,
       overflow: 'hidden',
     },
-    memberRow: {
-      flexDirection: 'row',
+    loader: {
+      minHeight: 180,
       alignItems: 'center',
+      justifyContent: 'center',
+    },
+    memberRow: {
       paddingVertical: 12,
       paddingHorizontal: 14,
+      gap: 10,
+    },
+    memberSummary: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: 12,
     },
     memberBody: { flex: 1, gap: 2 },
@@ -707,16 +923,27 @@ function makeStyles(c: Colors) {
     },
     memberActions: {
       flexDirection: 'row',
-      gap: 6,
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginLeft: 42 + 12,
+      paddingTop: 9,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.separator as string,
     },
-    iconBtn: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
+    memberActionButton: {
+      flex: 1,
+      minWidth: 44,
+      height: 44,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: c.fillQuaternary,
+      borderRadius: radius.lg,
     },
+    memberActionButtonPressed: {
+      opacity: 0.7,
+      transform: [{ scale: 0.96 }],
+    },
+    memberActionButtonDisabled: { opacity: 0.4 },
     separator: {
       height: StyleSheet.hairlineWidth,
       backgroundColor: c.separator as string,

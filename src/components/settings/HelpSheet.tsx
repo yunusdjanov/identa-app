@@ -44,7 +44,12 @@ export default function HelpSheet({ visible, onClose }: Props) {
   }
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('settings.helpSheet.title')}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={t('settings.helpSheet.title')}
+      closeAccessibilityLabel={t('common.close')}
+    >
       <Text style={styles.subtitle}>{t('settings.helpSheet.subtitle')}</Text>
 
       <View style={styles.list}>

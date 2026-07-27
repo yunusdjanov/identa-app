@@ -4,35 +4,35 @@
 > **Partial**, or **Missing**, with file-level evidence and parity notes vs the
 > web app. Use this to know exactly what's left before calling the app shippable.
 >
-> Verified against the codebase 2026-06-05 (3 independent read-throughs).
+> Settings/finance status re-verified against the mobile and Laravel codebases
+> on 2026-07-26.
 > Legend: ✅ Done · 🟡 Partial · ⛔ Missing/stub.
 
 ## TL;DR
 
 The app is **further along than "70–75%" in the clinical core** — patients,
 treatments, appointments and clinical images are fully built and wired to the
-real API. The remaining work is concentrated in: **(a) auth extras** (Google
-sign-in, biometrics), **(b) three Settings sub-features with no backend yet**
-(notification prefs, active sessions, push-device registration), **(c) billing
-checkout**, and **(d) polish** (dark-mode rollout, locale persistence, EAS
-project wiring). None of the clinical CRUD paths are blocked.
+real API. The remaining work is concentrated in auth extras (Google sign-in,
+biometrics), deferred notification/session features that currently have no
+mobile surface, and release verification. Dark mode is intentionally paused,
+locale persistence and PayX billing are implemented, and none of the clinical
+CRUD paths are blocked.
 
 | Domain | Status | One-line |
 |---|---|---|
 | Auth (login/register/reset/change pw) | ✅ | Solid; Google + biometric are stubs |
 | Dashboard | ✅ | Real KPIs; only the sparkline trend is synthetic |
 | Patients (list/detail/CRUD/photo) | ✅ | Complete |
-| Odontogram | 🟡 | View-only — no standalone condition editing |
 | Treatments | ✅ | Full CRUD incl. tooth picker + images |
 | Gallery / clinical images | ✅ | Upload wired; scan-status + variant fallback handled |
 | Appointments (week/day/CRUD/conflicts) | ✅ | Complete |
-| Payments / debts | ✅ | Read view + quick-payment write; no invoice UI (intentional) |
-| Settings — profile/hours/practice/pw/team/lang/theme | ✅ | Complete, real APIs |
-| Settings — notifications prefs | ⛔ | UI built, **mock-only** (no backend route) |
-| Settings — active sessions | ⛔ | UI built, **mock-only** (no backend route) |
-| Push notifications (remote delivery) | ⛔ | Token fetched but **device registration is mock-only** |
-| Billing upgrade / in-app checkout | ⛔ | CTA is a `comingSoon` stub |
-| Notification center / inbox (header bell) | ⛔ | `comingSoon` stub |
+| Payments / debts | ✅ | Currency-safe ledger + expenses CRUD + patient PDF export |
+| Settings — profile/hours/practice/pw/team/lang/billing | ✅ | Complete, real APIs |
+| Settings — notifications prefs | ⏸ | Temporarily removed from mobile by product decision |
+| Settings — active sessions | ⏸ | Not exposed; backend route does not exist |
+| Push notifications (remote delivery) | ⏸ | Temporarily removed; no native permission/plugin in the build |
+| Billing upgrade / in-app checkout | ✅ | PayX checkout, downgrade, cancellation and bounded payment history |
+| Notification center / inbox | ⏸ | Deferred; no header action in the current build |
 
 ---
 
@@ -60,7 +60,7 @@ entry.
 **Done:** snapshot query keyed to local "today"; camelCase→snake remap + `Number()`
 coercion (with the documented earlier bug fixed, `dashboard.ts:128-167`); KPIs for
 revenue, outstanding debt, today's appointments, next-appointment; swipe-to-
-complete/cancel with optimistic cache patch + reminder cancellation; permission-
+complete/cancel with optimistic cache patch; permission-
 gated cards; offline/error/empty/after-hours states.
 
 **Caveat:** 🟡 the finance **sparkline trend is synthetic** — `buildTrend()` fabricates
@@ -80,30 +80,16 @@ allergies/meds/history, photo pick+upload+remove, client validation mirroring
 update/archive/restore/forceDelete/photo/categories).
 
 **Minor gaps:** list requests `per_page: 100` instead of true infinite scroll
-(`PatientListScreen.tsx:98`) — fine at clinic scale; no patient-level "quick
-payment" shortcut (the `/patients/{id}/quick-payments` endpoint is reached only
-through the treatment flow).
-
-## Odontogram — 🟡 (view-only)
-
-**Done:** 32-tooth chart (4 quadrants), condition colors from the summary endpoint,
-per-tooth treatment-count badges, summary cards, tooth-detail modal with per-tooth
-accounting + history.
-
-**Missing:** ⛔ no way to create/edit a **standalone odontogram condition entry** —
-`listPatientOdontogram` (`odontogram.ts:21`) is never called and there are no write
-endpoints. Conditions change only indirectly via treatments. This is **by design**
-(treatments are the source of truth), but if the product wants direct charting it's
-unbuilt. Confirm the intended UX before treating it as a gap.
+(`PatientListScreen.tsx:98`) — fine at clinic scale.
 
 ## Treatments — ✅
 
 **Done:** full CRUD (`treatments.ts`): create/update/delete
-`POST/PUT/DELETE /patients/{id}/treatments`, single-fetch with images, payment via
-quick-payments. `TreatmentEditSheet.tsx` covers type, back-datable date (capped at
-today), an embedded **tooth picker** (odontogram), debt/paid amounts, 5000-char
+`POST/PUT/DELETE /patients/{id}/treatments`, single-fetch with images.
+`TreatmentEditSheet.tsx` covers type, back-datable date (capped at
+today), an embedded **tooth picker**, debt/paid amounts, 5000-char
 comment, photo upload, 422 field-error mapping, delete-with-confirm. Reachable from
-Patient Detail and Odontogram. Web parity met.
+Patient Detail. The standalone odontogram feature is intentionally out of mobile scope.
 
 ## Gallery / clinical images — ✅
 
@@ -120,53 +106,51 @@ subscription `entry_image_limit` respected.
 dots, swipe navigation, "now" line, jump-to-today; conflict detection
 (`appointmentConflicts.ts`, excludes cancelled/no_show); create/edit/detail sheets
 (create sheet mounted globally, opened with patient/date prefill); optimistic status
-changes (blocks editing finalized appts), delete with reminder cancellation; correct
+changes (blocks editing finalized appts), delete with confirmation; correct
 `reason`→`notes` mapping (`appointments.ts:7-16`); list with `filter[date_from/to/
 status]`.
 
 ## Payments / debts — ✅
 
-**Done:** read-only debt/history view aggregating treatments by patient (paid/debt/
-net totals, patient + history tabs, search, sorted by |balance|). The **write** path
-lives in `TreatmentDetailSheet`: record payment with amount validation + balance cap,
-**cash / card / bank_transfer** selector, notes, via `recordQuickPayment` →
-`POST /patients/{id}/quick-payments`; delete payment with cache invalidation.
-`read_only` gating is correct (`canManage(user,'payments')`).
+**Done:** server-aggregated, paginated patient ledger and treatment-level history;
+UZS/USD totals stay separate; debt, settled balance and advance are represented
+explicitly. Search and outstanding filters affect only the list, never the global
+summary cards. Patient finance detail is authorized by `payments.view` alone and
+uses the ledger endpoint rather than loading clinical history. Expenses support
+validated CRUD, offline guards and idempotent create. Filtered patient/expense list
+exports and patient-ledger PDF export are permission-gated, bounded, and remove
+their temporary files after sharing.
 
-**Notes:** ⛔ no standalone invoice UI — **intentional** (mobile abstracts invoices
-away, documented `payments.ts:8-17`). `updatePayment` wrapper exists but has no edit
-UI (delete + re-record instead).
+**Notes:** payment values are authored on treatment records (`debt_amount`,
+`paid_amount`, currency), matching the current web/backend contract. Legacy
+quick-payment, invoice and standalone Payment client wrappers have been removed.
 
-## Settings — 🟡 (UI complete; 3 sub-features mock-backed)
+## Settings — 🟡 (core complete; selected extras deferred)
 
 **Done (real APIs):** profile edit, working hours, practice info (all
-`/settings/profile`), password change, language, theme/appearance, **team/staff
-management with full CRUD** (`/team/assistants`, dentist-only gated), billing view of
-the real `user.subscription`, logout. All 11 sheets are wired.
+`/settings/profile`), password change, persisted language, **team/staff
+management with full CRUD** (`/team/assistants`, dentist-only gated), PayX billing
+management and logout. Editable sheets guard unsaved changes and all security/
+subscription mutations follow the backend permission contract.
 
-**Missing / mock-only (no backend route exists yet):**
-- ⛔ **Notification preferences** — `notifications.ts:8` hardcoded `USE_MOCK = true`;
-  the sheet UI is real but persists nowhere.
-- ⛔ **Active sessions** — `sessions.ts:11` hardcoded `USE_MOCK = true` with seeded
-  fake sessions; "revoke" hits the mock.
-- ⛔ **Push-device registration** — `devices.ts:8` hardcoded `USE_MOCK = true`. The
-  Expo token is fetched at startup (`navigation/index.tsx:98-100`) but only ack'd to
-  memory, so **remote push cannot be delivered**. *(Local appointment reminders DO
-  work — `lib/notifications.ts`.)*
-- ⛔ **Billing upgrade** CTA is a stub (`BillingSheet.tsx:84` → `comingSoon`) — no
-  in-app checkout.
-- ⛔ **Notification center** behind the dashboard header bell is a stub
-  (`DashboardHeader.tsx:84` → `comingSoon`).
+**Deferred / mock-only:**
+- ⏸ **Notifications** — temporarily removed from mobile. The Expo plugin,
+  native notification permission, local-reminder scheduler, device registration,
+  preferences API and Settings sheet are not part of the current build.
+- ⏸ **Dark mode** — temporarily removed from Settings; the current release is
+  explicitly light-only (`app.json → userInterfaceStyle`).
+- ⏸ **Active sessions** — the unfinished mock implementation is not reachable
+  from Settings because no backend list/revoke contract exists.
 
 ---
 
 ## Parity with the web app
 
 Present on web, **not** on mobile (decide per-product whether each is in scope):
-- Audit logs · advanced analytics dashboard · standalone invoices.
+- Selected admin-only workflows and billing checkout.
 
 Present on **both** and at parity: patients, appointments, treatments, payments
-(quick), odontogram (web has editing; mobile view-only), team/staff management,
+(treatment ledger + expenses), team/staff management,
 profile/practice settings, subscription/billing **view**.
 
 Just shipped on web, **pending on mobile**: **Google account link/connect** (web

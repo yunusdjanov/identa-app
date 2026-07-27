@@ -15,6 +15,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Icon from '../ui/Icon'
+import ProtectedPatientMediaImage from '../ui/ProtectedPatientMediaImage'
 import { useI18n } from '../../i18n'
 import { spacing, typography, font } from '../../constants/theme'
 
@@ -39,6 +40,11 @@ interface Props {
   // Optional caption rendered above the index counter — useful for "before"
   // / "after" / patient names when called from the patient timeline.
   caption?: string
+  actionLabel?: string
+  onAction?: () => void
+  moreLabel?: string
+  onMore?: () => void
+  protectedPatientMedia?: boolean
 }
 
 export default function LightboxViewer({
@@ -47,6 +53,11 @@ export default function LightboxViewer({
   startIndex = 0,
   onClose,
   caption,
+  actionLabel,
+  onAction,
+  moreLabel,
+  onMore,
+  protectedPatientMedia = false,
 }: Props) {
   const { t } = useI18n()
   // Re-read dimensions every render via the hook so rotation, foldables,
@@ -125,7 +136,15 @@ export default function LightboxViewer({
           viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
           renderItem={({ item }) => (
             <View style={styles.page}>
-              <Image source={{ uri: item }} style={styles.image} resizeMode="contain" />
+              {protectedPatientMedia ? (
+                <ProtectedPatientMediaImage
+                  uri={item}
+                  style={styles.image}
+                  resizeMode="contain"
+                />
+              ) : (
+                <Image source={{ uri: item }} style={styles.image} resizeMode="contain" />
+              )}
             </View>
           )}
         />
@@ -150,9 +169,35 @@ export default function LightboxViewer({
                 </Text>
               ) : null}
             </View>
-            <View style={styles.spacer} />
+            {onMore ? (
+              <Pressable
+                onPress={onMore}
+                style={styles.closeBtn}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={moreLabel ?? t('patients.actions.more')}
+              >
+                <Icon name="ellipsis-horizontal" size={21} color="#FFFFFF" />
+              </Pressable>
+            ) : (
+              <View style={styles.spacer} />
+            )}
           </View>
         </SafeAreaView>
+
+        {actionLabel && onAction ? (
+          <SafeAreaView edges={['bottom']} style={styles.bottomBar} pointerEvents="box-none">
+            <Pressable
+              onPress={onAction}
+              style={styles.actionBtn}
+              accessibilityRole="button"
+              accessibilityLabel={actionLabel}
+            >
+              <Icon name="create-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.actionText}>{actionLabel}</Text>
+            </Pressable>
+          </SafeAreaView>
+        ) : null}
       </View>
     </Modal>
   )
@@ -211,6 +256,30 @@ function makeStyles(screenW: number, screenH: number) {
     },
     spacer: {
       width: 36,
+    },
+    bottomBar: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.md,
+    },
+    actionBtn: {
+      minHeight: 44,
+      paddingHorizontal: spacing.lg,
+      borderRadius: 22,
+      backgroundColor: 'rgba(20, 184, 166, 0.92)',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+    },
+    actionText: {
+      ...typography.subheadBold,
+      fontFamily: font('600'),
+      color: '#FFFFFF',
     },
   })
 }

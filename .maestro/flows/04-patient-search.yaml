@@ -20,12 +20,8 @@ tags:
 # Open the search field if there is one, type a single letter to exercise
 # the search filter pipeline. (Most patients in a clinic have an `a` in
 # their name, so this is a stable smoke probe.)
-- runFlow:
-    when:
-      visible: "Qidirish"
-    commands:
-      - tapOn: "Qidirish"
-      - inputText: "a"
-      - hideKeyboard
-      - waitForAnimationToEnd:
-          timeout: 3000
+- tapOn: "Bemor qidirish..."
+- inputText: "a"
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 3000

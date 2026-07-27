@@ -155,7 +155,12 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
   const isPending = createMutation.isPending || updateMutation.isPending
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('patients.categories.title')}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={t('patients.categories.title')}
+      closeAccessibilityLabel={t('common.close')}
+    >
       {/* Form when active */}
       {showForm ? (
         <View style={styles.formCard}>
@@ -172,7 +177,7 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
             {t('patients.categories.colorLabel')}
           </Text>
           <View style={styles.colorRow}>
-            {COLOR_PALETTE.map((hex) => {
+            {COLOR_PALETTE.map((hex, index) => {
               const active = hex === color
               return (
                 <Pressable
@@ -182,6 +187,9 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
                     setColor(hex)
                   }}
                   style={[styles.colorSwatch, { backgroundColor: hex }, active && styles.colorSwatchActive]}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('patients.categories.selectColor', { number: index + 1 })}
+                  accessibilityState={{ selected: active }}
                 >
                   {active ? <Icon name="checkmark" size={16} color="#FFFFFF" /> : null}
                 </Pressable>
@@ -242,6 +250,8 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
                       onPress={() => openEdit(cat)}
                       hitSlop={8}
                       style={styles.actionBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('patients.categories.editCategory', { name: cat.name })}
                     >
                       <Icon name="create-outline" size={18} color={c.brand as string} />
                     </Pressable>
@@ -249,6 +259,8 @@ export default function PatientCategoriesSheet({ visible, onClose }: Props) {
                       onPress={() => onDelete(cat)}
                       hitSlop={8}
                       style={styles.actionBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('patients.categories.deleteCategory', { name: cat.name })}
                     >
                       <Icon name="trash-outline" size={18} color={c.danger as string} />
                     </Pressable>
@@ -287,9 +299,9 @@ function makeStyles(c: Colors) {
       flexWrap: 'wrap',
     },
     colorSwatch: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       alignItems: 'center',
       justifyContent: 'center',
     },

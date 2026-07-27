@@ -139,6 +139,18 @@ export const radius = {
   pill: 9999,
 } as const
 
+// Shared metrics for every single-line text control. Multiline textareas and
+// compound pickers intentionally keep content-driven heights.
+export const inputMetrics = {
+  height: 44,
+  paddingHorizontal: 12,
+  fontSize: 14,
+  lineHeight: 19,
+  iconSize: 20,
+  iconBoxSize: 24,
+  contentGap: 10,
+} as const
+
 // Typography: iOS uses native SF Pro (System font); Android uses Inter
 // (bundled Google font) which is visually closest to SF Pro. Each weight is
 // a separate font family on Android because RN doesn't auto-pick weights

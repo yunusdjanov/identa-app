@@ -110,11 +110,16 @@ export default function CreateActionSheet({
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={close}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={close}>
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={close}
+        accessible={false}
+      >
         <Animated.View style={[styles.backdrop, { opacity: fade }]} />
       </Pressable>
 
       <Animated.View
+        accessibilityViewIsModal
         style={[
           styles.sheet,
           shadows.lg,
@@ -129,6 +134,9 @@ export default function CreateActionSheet({
             <Pressable
               key={i}
               onPress={action.onPress}
+              accessibilityRole="button"
+              accessibilityLabel={action.title}
+              accessibilityHint={action.description}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
             >
               <View style={[styles.iconBubble, { backgroundColor: action.iconBg }]}>

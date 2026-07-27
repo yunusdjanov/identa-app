@@ -1,17 +1,24 @@
 import React, { useMemo, useState } from 'react'
 import { View, Text, StyleSheet, ActivityIndicator, TextInput, Pressable } from 'react-native'
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import BottomSheet from '../ui/BottomSheet'
 import Icon from '../ui/Icon'
 import EmptyState from '../ui/EmptyState'
+import Button from '../ui/Button'
 import { useI18n } from '../../i18n'
 import type { TFunction } from '../../i18n/helpers'
 import { listAuditLogs } from '../../api/audit'
 import { useDebouncedValue } from '../../lib/useDebouncedValue'
 import { toIntlLocale } from '../../lib/format'
 import type { Locale } from '../../constants'
-import { font, radius, spacing, typography } from '../../constants/theme'
+import {
+  font,
+  inputMetrics,
+  radius,
+  spacing,
+  typography,
+} from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import type { ApiAuditLogEntry } from '../../types'
 
@@ -38,6 +45,12 @@ function formatDateTime(value: string | null, locale: Locale): string {
 function prettifyEvent(eventType: string): string {
   const s = eventType.replace(/[._]/g, ' ').trim()
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : eventType
+}
+
+function eventLabel(eventType: string, t: TFunction): string {
+  const key = `settings.logs.event.${eventType}`
+  const translated = t(key)
+  return translated === key ? prettifyEvent(eventType) : translated
 }
 
 function maskRoute(raw: string): string {
@@ -89,22 +102,31 @@ export default function AuditLogsSheet({ visible, onClose }: Props) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const debouncedSearch = useDebouncedValue(search, 300)
+  const trimmedSearch = debouncedSearch.trim()
+  const querySearch = trimmedSearch.length >= 2 ? trimmedSearch.slice(0, 100) : undefined
 
   const query = useQuery({
-    queryKey: ['audit-logs', debouncedSearch, page],
+    queryKey: ['audit-logs', querySearch, page],
     queryFn: () =>
-      listAuditLogs({ page, per_page: 10, search: debouncedSearch.trim() || undefined }),
+      listAuditLogs({ page, per_page: 10, search: querySearch }),
     enabled: visible,
     staleTime: 30_000,
+    placeholderData: keepPreviousData,
   })
 
   const entries = query.data?.data ?? []
   const totalPages = query.data?.meta?.pagination?.total_pages ?? 1
   const canPrev = page > 1
   const canNext = page < totalPages
+  const paging = query.isFetching && query.isPlaceholderData
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('settings.logs.title')}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={t('settings.logs.title')}
+      closeAccessibilityLabel={t('common.close')}
+    >
       <Text style={styles.subtitle}>{t('settings.logs.subtitle')}</Text>
 
       <View style={styles.searchWrap}>
@@ -117,10 +139,26 @@ export default function AuditLogsSheet({ visible, onClose }: Props) {
             setPage(1)
           }}
           placeholder={t('settings.logs.searchPlaceholder')}
+          accessibilityLabel={t('settings.logs.searchPlaceholder')}
           placeholderTextColor={c.labelTertiary as string}
           autoCapitalize="none"
           autoCorrect={false}
+          maxLength={100}
         />
+        {search ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('common.clear')}
+            hitSlop={8}
+            onPress={() => {
+              setSearch('')
+              setPage(1)
+            }}
+            style={styles.clearButton}
+          >
+            <Icon name="close-circle" size={17} color={c.labelTertiary as string} />
+          </Pressable>
+        ) : null}
       </View>
 
       {query.isLoading ? (
@@ -128,7 +166,19 @@ export default function AuditLogsSheet({ visible, onClose }: Props) {
           <ActivityIndicator color={c.brand as string} />
         </View>
       ) : query.isError ? (
-        <Text style={styles.errorText}>{t('settings.logs.loadFailed')}</Text>
+        <EmptyState
+          iconName="cloud-offline-outline"
+          title={t('settings.logs.loadFailed')}
+          tone="danger"
+          action={
+            <Button
+              title={t('common.retry')}
+              variant="secondary"
+              size="md"
+              onPress={() => query.refetch()}
+            />
+          }
+        />
       ) : entries.length === 0 ? (
         <EmptyState
           iconName="document-text-outline"
@@ -145,7 +195,7 @@ export default function AuditLogsSheet({ visible, onClose }: Props) {
                 <View style={styles.row}>
                   <View style={styles.rowHead}>
                     <Text style={styles.event} numberOfLines={1}>
-                      {prettifyEvent(e.event_type)}
+                      {eventLabel(e.event_type, t)}
                     </Text>
                     <Text style={styles.time}>{formatDateTime(e.created_at, locale as Locale)}</Text>
                   </View>
@@ -175,10 +225,13 @@ export default function AuditLogsSheet({ visible, onClose }: Props) {
       {!query.isLoading && !query.isError && entries.length > 0 ? (
         <View style={styles.pager}>
           <Pressable
-            disabled={!canPrev}
+            disabled={!canPrev || paging}
             onPress={() => setPage((p) => Math.max(1, p - 1))}
-            style={[styles.pageBtn, !canPrev && styles.pageBtnDisabled]}
+            style={[styles.pageBtn, (!canPrev || paging) && styles.pageBtnDisabled]}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.back')}
+            accessibilityState={{ disabled: !canPrev || paging }}
           >
             <Icon name="chevron-back" size={18} color={(canPrev ? c.label : c.labelTertiary) as string} />
           </Pressable>
@@ -186,10 +239,13 @@ export default function AuditLogsSheet({ visible, onClose }: Props) {
             {t('settings.logs.pageOf', { page, total: totalPages })}
           </Text>
           <Pressable
-            disabled={!canNext}
+            disabled={!canNext || paging}
             onPress={() => setPage((p) => p + 1)}
-            style={[styles.pageBtn, !canNext && styles.pageBtnDisabled]}
+            style={[styles.pageBtn, (!canNext || paging) && styles.pageBtnDisabled]}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.next')}
+            accessibilityState={{ disabled: !canNext || paging }}
           >
             <Icon name="chevron-forward" size={18} color={(canNext ? c.label : c.labelTertiary) as string} />
           </Pressable>
@@ -212,25 +268,28 @@ function makeStyles(c: Colors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      paddingHorizontal: 12,
-      height: 40,
+      paddingHorizontal: inputMetrics.paddingHorizontal,
+      height: inputMetrics.height,
       borderRadius: radius.lg,
       backgroundColor: c.fillQuaternary,
       marginBottom: spacing.sm,
     },
     searchInput: {
       flex: 1,
-      ...typography.body,
+      fontFamily: font('400'),
+      fontSize: inputMetrics.fontSize,
+      lineHeight: inputMetrics.lineHeight,
       color: c.label,
       padding: 0,
     },
-    loader: { paddingVertical: spacing.xl, alignItems: 'center' },
-    errorText: {
-      ...typography.subhead,
-      color: c.danger,
-      textAlign: 'center',
-      paddingVertical: spacing.lg,
+    clearButton: {
+      width: 28,
+      height: 28,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.pill,
     },
+    loader: { paddingVertical: spacing.xl, alignItems: 'center' },
     list: {
       backgroundColor: c.background,
       borderRadius: radius.xl,

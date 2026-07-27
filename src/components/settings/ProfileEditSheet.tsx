@@ -1,17 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, StyleSheet } from 'react-native'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import BottomSheet from '../ui/BottomSheet'
 import InputCard from '../ui/InputCard'
 import Button from '../ui/Button'
+import ProfileFormGuard from './ProfileFormGuard'
 import { useToast } from '../ui/Toast'
 import { getProfile, updateProfile } from '../../api/profile'
+import { getCurrentUser } from '../../api/auth'
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
 import { spacing, typography, font } from '../../constants/theme'
 import { useColors, type Colors } from '../../lib/useColors'
 import { isOfflineError } from '../../lib/offlineGuard'
-import { applyPhoneInput, formatStoredPhone } from '../../lib/phoneFormat'
+import { applyPhoneInput, formatStoredPhone, isValidUzbekPhone } from '../../lib/phoneFormat'
+import { INPUT_LIMITS } from '../../lib/validation'
+import { useSettingsFormDismiss } from './useSettingsFormDismiss'
 
 interface Props {
   visible: boolean
@@ -39,37 +43,82 @@ export default function ProfileEditSheet({ visible, onClose }: Props) {
   const [phone, setPhone] = useState('')
   const [license, setLicense] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const initialValues = useRef('')
 
   useEffect(() => {
-    if (profileQuery.data) {
-      setName(profileQuery.data.name ?? '')
-      setEmail(profileQuery.data.email ?? '')
-      setPhone(formatStoredPhone(profileQuery.data.phone))
-      setLicense(profileQuery.data.license_number ?? '')
+    if (visible && profileQuery.data) {
+      const nextName = profileQuery.data.name ?? ''
+      const nextEmail = profileQuery.data.email ?? ''
+      const nextPhone = formatStoredPhone(profileQuery.data.phone)
+      const nextLicense = profileQuery.data.license_number ?? ''
+      setName(nextName)
+      setEmail(nextEmail)
+      setPhone(nextPhone)
+      setLicense(nextLicense)
       setSubmitted(false)
+      initialValues.current = JSON.stringify({
+        name: nextName,
+        email: nextEmail,
+        phone: nextPhone,
+        license: nextLicense,
+      })
     }
-  }, [profileQuery.data])
+  }, [profileQuery.data, visible])
 
   const isDentist = user?.role === 'dentist'
 
-  const nameError = submitted && !name.trim() ? t('login.errors.emailRequired') : null
-  const emailError = submitted && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-    ? t('login.errors.emailInvalid')
-    : null
+  const normalizedName = name.trim()
+  const normalizedEmail = email.trim()
+  const nameInvalid =
+    normalizedName.length < 3 || normalizedName.length > INPUT_LIMITS.personName
+  const emailInvalid = !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+    || normalizedEmail.length > INPUT_LIMITS.email
+  const phoneInvalid = Boolean(phone.trim()) && !isValidUzbekPhone(phone)
+  const licenseInvalid = license.trim().length > 50
 
   const mutation = useMutation({
     mutationFn: () =>
       updateProfile({
-        name: name.trim(),
-        email: email.trim(),
+        name: normalizedName,
+        email: normalizedEmail,
         phone: phone.trim() ? applyPhoneInput(phone).raw : null,
         license_number: license.trim() || null,
       }),
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       toast.success(t('settings.profileSheet.saved'))
-      if (user) setUser({ ...user, name: data.name, email: data.email })
+      if (user) {
+        const emailChanged = user.email !== data.email
+        setUser({
+          ...user,
+          name: data.name,
+          email: data.email,
+          ...(emailChanged ? { email_verified_at: undefined } : {}),
+        })
+      }
       queryClient.invalidateQueries({ queryKey: ['settings', 'profile'] })
+      queryClient.invalidateQueries({ queryKey: ['auth', 'me'] })
       onClose()
+
+      // The profile response intentionally contains only editable fields.
+      // Refresh /auth/me so security-derived flags (especially email
+      // verification after an address change) stay server-authoritative.
+      try {
+        const refreshedUser = await queryClient.fetchQuery({
+          queryKey: ['auth', 'me'],
+          queryFn: getCurrentUser,
+          staleTime: 0,
+        })
+        const currentSession = useAuthStore.getState()
+        if (
+          currentSession.isAuthenticated &&
+          currentSession.user?.id === refreshedUser.id
+        ) {
+          setUser(refreshedUser)
+        }
+      } catch {
+        // The immediate local merge above already fails safe by clearing the
+        // verification flag when the email changed.
+      }
     },
     onError: (err) => {
       if (isOfflineError(err)) return
@@ -78,17 +127,37 @@ export default function ProfileEditSheet({ visible, onClose }: Props) {
   })
 
   const handleSubmit = () => {
+    if (!profileQuery.data) return
     setSubmitted(true)
-    if (!name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return
+    if (nameInvalid || emailInvalid || phoneInvalid || licenseInvalid) {
+      toast.error(t('settings.profileSheet.fixErrors'))
+      return
+    }
     mutation.mutate()
   }
+
+  const isDirty =
+    visible &&
+    Boolean(profileQuery.data) &&
+    initialValues.current !== JSON.stringify({ name, email, phone, license })
+  const canDismiss = useSettingsFormDismiss({
+    isDirty,
+    isPending: mutation.isPending,
+  })
 
   return (
     <BottomSheet
       visible={visible}
       onClose={onClose}
+      onBeforeClose={canDismiss}
       title={t('settings.rows.profile')}
+      closeAccessibilityLabel={t('common.close')}
     >
+      <ProfileFormGuard
+        isLoading={profileQuery.isLoading}
+        isError={profileQuery.isError && !profileQuery.data}
+        onRetry={() => profileQuery.refetch()}
+      >
       <Field label={t('settings.profileSheet.nameLabel')}>
         <InputCard
           iconName="person-outline"
@@ -96,7 +165,8 @@ export default function ProfileEditSheet({ visible, onClose }: Props) {
           onChangeText={setName}
           placeholder={t('settings.profileSheet.namePlaceholder')}
           autoCapitalize="words"
-          error={Boolean(nameError)}
+          maxLength={INPUT_LIMITS.personName}
+          error={submitted && nameInvalid}
         />
       </Field>
 
@@ -109,7 +179,8 @@ export default function ProfileEditSheet({ visible, onClose }: Props) {
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
-          error={Boolean(emailError)}
+          maxLength={INPUT_LIMITS.email}
+          error={submitted && emailInvalid}
         />
       </Field>
 
@@ -121,6 +192,7 @@ export default function ProfileEditSheet({ visible, onClose }: Props) {
           placeholder={t('settings.profileSheet.phonePlaceholder')}
           keyboardType="phone-pad"
           maxLength={17}
+          error={submitted && phoneInvalid}
         />
       </Field>
 
@@ -131,6 +203,8 @@ export default function ProfileEditSheet({ visible, onClose }: Props) {
             value={license}
             onChangeText={setLicense}
             placeholder={t('settings.profileSheet.licensePlaceholder')}
+            maxLength={50}
+            error={submitted && licenseInvalid}
           />
         </Field>
       ) : null}
@@ -147,6 +221,7 @@ export default function ProfileEditSheet({ visible, onClose }: Props) {
         size="lg"
         style={{ marginTop: spacing.xs }}
       />
+      </ProfileFormGuard>
     </BottomSheet>
   )
 }

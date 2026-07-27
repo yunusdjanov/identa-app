@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useMutation } from '@tanstack/react-query'
 import { useNavigation } from '@react-navigation/native'
+import { useRoute, type RouteProp } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import * as Haptics from 'expo-haptics'
 
@@ -24,7 +25,6 @@ import Button from '../../components/ui/Button'
 import Checkbox from '../../components/ui/Checkbox'
 import InputCard from '../../components/ui/InputCard'
 import LanguageSwitcher from '../../components/ui/LanguageSwitcher'
-import GoogleMark from '../../components/ui/GoogleMark'
 import Icon from '../../components/ui/Icon'
 import { useToast } from '../../components/ui/Toast'
 
@@ -33,20 +33,22 @@ import { useColors, type Colors } from '../../lib/useColors'
 import { useI18n } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
 import { login as loginApi } from '../../api/auth'
-import { isApiError } from '../../api/client'
+import { getAuthErrorMessage } from '../../lib/authErrorMessage'
 import type { AuthStackParams } from '../../navigation'
 
 type Nav = NativeStackNavigationProp<AuthStackParams, 'Login'>
+type LoginRoute = RouteProp<AuthStackParams, 'Login'>
 
 export default function LoginScreen() {
   const { t } = useI18n()
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   const navigation = useNavigation<Nav>()
+  const route = useRoute<LoginRoute>()
   const setSession = useAuthStore((s) => s.setSession)
   const toast = useToast()
 
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(route.params?.initialEmail ?? '')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
   const [showPwd, setShowPwd] = useState(false)
@@ -67,19 +69,13 @@ export default function LoginScreen() {
     onSuccess: ({ user, tokens }) => {
       // Token must land in the store BEFORE any other request fires so
       // the axios interceptor attaches it. setSession is synchronous.
-      setSession(user, tokens)
+      setSession(user, tokens, remember)
       toast.success(t('login.success'))
     },
     onError: (err) => {
-      // Surface the backend's specific reason when present — e.g. a blocked or
-      // deleted account comes back as a 422 with an `email` field error
-      // (api.auth.account_inactive). Fall back to the generic message
-      // otherwise. The backend already localizes these.
-      const fieldMsg =
-        isApiError(err) && err.fieldErrors
-          ? Object.values(err.fieldErrors)[0]?.[0]
-          : undefined
-      toast.error(fieldMsg ?? t('login.errors.loginFailed'))
+      // Keep credential failures generic so blocked, missing, and
+      // wrong-password accounts cannot be enumerated.
+      toast.error(getAuthErrorMessage(err, t, 'login.errors.loginFailed'))
     },
   })
 
@@ -146,8 +142,14 @@ export default function LoginScreen() {
                     onSubmitEditing={() => passwordRef.current?.focus()}
                     maxLength={255}
                     error={Boolean(emailError)}
+                    errorMessage={emailError}
+                    accessibilityLabel={t('login.email')}
                   />
-                  {emailError ? <Text style={styles.fieldError}>{emailError}</Text> : null}
+                  {emailError ? (
+                    <Text style={styles.fieldError} accessibilityRole="alert" aria-live="polite">
+                      {emailError}
+                    </Text>
+                  ) : null}
                 </View>
 
                 <View>
@@ -166,8 +168,15 @@ export default function LoginScreen() {
                     onSubmitEditing={handleSubmit}
                     maxLength={255}
                     error={Boolean(passwordError)}
+                    errorMessage={passwordError}
+                    accessibilityLabel={t('login.password')}
                     rightAccessory={
-                      <Pressable onPress={() => setShowPwd((v) => !v)} hitSlop={12}>
+                      <Pressable
+                        onPress={() => setShowPwd((v) => !v)}
+                        hitSlop={12}
+                        accessibilityRole="button"
+                        accessibilityLabel={t(showPwd ? 'login.hide' : 'login.show')}
+                      >
                         <Icon
                           name={showPwd ? 'eye-off-outline' : 'eye-outline'}
                           size={20}
@@ -177,13 +186,19 @@ export default function LoginScreen() {
                     }
                   />
                   {passwordError ? (
-                    <Text style={styles.fieldError}>{passwordError}</Text>
+                    <Text style={styles.fieldError} accessibilityRole="alert" aria-live="polite">
+                      {passwordError}
+                    </Text>
                   ) : null}
                 </View>
 
                 <View style={styles.row}>
                   <Checkbox checked={remember} onChange={setRemember} label={t('login.rememberMe')} />
-                  <Pressable onPress={() => navigation.navigate('ForgotPassword')} hitSlop={10}>
+                  <Pressable
+                    onPress={() => navigation.navigate('ForgotPassword')}
+                    hitSlop={10}
+                    accessibilityRole="link"
+                  >
                     <Text style={styles.link}>{t('login.forgotPassword')}</Text>
                   </Pressable>
                 </View>
@@ -202,25 +217,15 @@ export default function LoginScreen() {
                   }
                 />
 
-                <View style={styles.divider}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>{t('login.orContinueWith')}</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-
-                <Button
-                  title={t('login.googleSignIn')}
-                  variant="secondary"
-                  fullWidth
-                  size="lg"
-                  leftIcon={<GoogleMark size={20} />}
-                  onPress={() => toast.info(t('settings.comingSoon'))}
-                />
               </View>
 
               <View style={styles.footer}>
                 <Text style={styles.footerText}>{t('login.noAccount')} </Text>
-                <Pressable onPress={() => navigation.navigate('Register')} hitSlop={8}>
+                <Pressable
+                  onPress={() => navigation.navigate('Register')}
+                  hitSlop={8}
+                  accessibilityRole="link"
+                >
                   <Text style={styles.link}>{t('login.createAccount')}</Text>
                 </Pressable>
               </View>
@@ -291,24 +296,6 @@ function makeStyles(c: Colors) {
     link: {
       ...typography.subheadBold,
       color: c.brand,
-    },
-    divider: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.md,
-      marginVertical: spacing.xl,
-    },
-    dividerLine: {
-      flex: 1,
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: c.separator as string,
-    },
-    dividerText: {
-      ...typography.caption1,
-      fontFamily: font('600'),
-      color: c.labelSecondary,
-      letterSpacing: 1.5,
-      fontWeight: '600',
     },
     footer: {
       flexDirection: 'row',

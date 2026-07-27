@@ -22,7 +22,7 @@ export default function ProfileCard({ user }: Props) {
 
   return (
     <View style={styles.card}>
-      <PatientAvatar name={user.name} size={64} />
+      <PatientAvatar name={user.name} uri={user.avatar_url} size={64} />
       <View style={styles.body}>
         <Text style={styles.name} numberOfLines={1}>{user.name}</Text>
         <Text style={styles.email} numberOfLines={1}>{user.email}</Text>

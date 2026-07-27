@@ -1,0 +1,18 @@
+# Registration screen contract without creating live backend data. It verifies
+# navigation, all required-field validation, and legal-consent enforcement.
+appId: uz.identa.mobile
+tags:
+  - auth
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- tapOn: "Ro'yxatdan o'ting"
+- assertVisible: "Yangi hisob yarating"
+- tapOn: "Hisob yaratish"
+- assertVisible: "Ismingizni kiriting"
+- assertVisible: "Email manzilni kiriting"
+- assertVisible: "Parolni kiriting"
+- assertVisible: "Parolni tasdiqlang"
+- assertVisible: "Davom etish uchun shartlarni qabul qiling"
+- assertNotVisible: "Google bilan ro'yxatdan o'tish"

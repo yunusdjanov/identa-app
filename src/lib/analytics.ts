@@ -1,14 +1,14 @@
-// Client-side analytics aggregation — mirrors the web /analytics page.
-// The backend has no dedicated analytics endpoint; both web and mobile derive
-// KPIs from the same list data (treatments, patients, appointments) + the
-// dashboard snapshot, bucketed by a selected date range.
+// Analytics calculation helpers shared with the mobile summary screen.
+// The live screen now reads the bounded, server-aggregated analytics summary.
+// These pure helpers remain useful for date bounds, deltas, local fixtures,
+// and regression tests without coupling those calculations to React.
 //
 // Date handling mirrors web lib/analytics/date-bounds.ts: `YYYY-MM-DD` strings
 // are parsed as LOCAL midnight (the backend mixes date-only and full ISO), so
 // records on the last day of a range don't slip into the previous bucket for
 // viewers in UTC+5.
 
-export type AnalyticsRange = '7d' | '30d' | '180d' | '365d' | 'ytd'
+export type AnalyticsRange = '7d' | '30d' | '90d' | '180d' | '365d' | 'ytd'
 
 // '90d' is intentionally omitted from the presets (product decision, matches web).
 export const ANALYTICS_RANGES: readonly AnalyticsRange[] = ['7d', '30d', '180d', '365d', 'ytd']
@@ -41,7 +41,16 @@ export function getRangeBounds(range: AnalyticsRange, now: Date = new Date()): {
   if (range === 'ytd') {
     return { start: new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0), end }
   }
-  const days = range === '7d' ? 7 : range === '30d' ? 30 : range === '180d' ? 180 : 365
+  const days =
+    range === '7d'
+      ? 7
+      : range === '30d'
+        ? 30
+        : range === '90d'
+          ? 90
+          : range === '180d'
+            ? 180
+            : 365
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1), 0, 0, 0, 0)
   return { start, end }
 }

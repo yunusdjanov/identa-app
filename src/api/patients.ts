@@ -1,18 +1,24 @@
 import client from './client'
 import { requireOnline } from '../lib/offlineGuard'
+import { shouldUseMockApi } from '../lib/mockApi'
 import type {
   ApiAppointment,
   ApiPatient,
+  ApiPatientClinicalPhoto,
+  ApiPatientLookup,
   ApiPatientCategory,
   ApiListResponse,
   ApiResponse,
 } from '../types'
 
-// Per-resource mock flag. Flip via `EXPO_PUBLIC_MOCK_PATIENTS=false`
-// when wiring the real backend for this slice.
+// Patient records must use the real backend by default. Mock data is opt-in
+// so a missing build-time environment variable can never make a clinic see
+// fabricated patients.
 const USE_MOCK =
-  process.env.EXPO_PUBLIC_MOCK_PATIENTS !== 'false' &&
-  process.env.EXPO_PUBLIC_USE_MOCK_API !== 'false'
+  shouldUseMockApi(
+    process.env.EXPO_PUBLIC_MOCK_PATIENTS,
+    process.env.EXPO_PUBLIC_USE_MOCK_API
+  )
 
 function mockDelay<T>(value: T, ms = 400): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms))
@@ -115,10 +121,11 @@ function getMockPatients(): ApiPatient[] {
   return buildMockPatientList()
 }
 
-interface ListParams {
+export interface ListPatientsParams {
   search?: string
   page?: number
   per_page?: number
+  sort?: 'created_at' | '-created_at' | 'updated_at' | '-updated_at' | 'full_name' | '-full_name' | 'date_of_birth' | '-date_of_birth'
   category_id?: string
   archived?: boolean
   // YYYY-MM-DD — filter to patients whose last_visit_at is before this date
@@ -126,7 +133,75 @@ interface ListParams {
   inactive_before?: string
 }
 
-export const listPatients = async (params?: ListParams): Promise<ApiListResponse<ApiPatient>> => {
+const PATIENT_EXPORT_PAGE_SIZE = 100
+const MAX_PATIENT_EXPORT_PAGES = 20
+
+export interface LookupPatientsParams {
+  search?: string
+  id?: string
+  page?: number
+  per_page?: number
+  sort?: 'full_name' | '-updated_at'
+}
+
+interface PatientRequestOptions {
+  signal?: AbortSignal
+}
+
+/**
+ * Compact patient lookup used by appointment/payment selectors. This mirrors
+ * the web app and avoids loading clinical/profile fields for every keystroke.
+ */
+export const lookupPatients = async (
+  params?: LookupPatientsParams,
+  options?: PatientRequestOptions
+): Promise<ApiListResponse<ApiPatientLookup>> => {
+  if (USE_MOCK) {
+    const response = await listPatients({
+      search: params?.search,
+      page: params?.page,
+      per_page: params?.per_page,
+      sort: params?.sort ?? 'full_name',
+    })
+    const filtered = params?.id
+      ? response.data.filter((patient) => patient.id === params.id)
+      : response.data
+
+    return {
+      ...response,
+      data: filtered.map((patient) => ({
+        id: patient.id,
+        patient_id: patient.patient_id,
+        full_name: patient.full_name,
+        phone: patient.phone,
+        secondary_phone: patient.secondary_phone,
+        updated_at: patient.updated_at ?? null,
+        photo_scan_status: patient.photo_scan_status ?? null,
+        photo_thumbnail_url: patient.photo_thumbnail_url ?? null,
+        photo_url: patient.photo_url ?? null,
+      })),
+    }
+  }
+
+  const realParams: Record<string, string | number> = {}
+  if (params?.search) realParams['filter[search]'] = params.search
+  if (params?.id) realParams['filter[id]'] = params.id
+  if (params?.sort) realParams.sort = params.sort
+  if (params?.page) realParams.page = params.page
+  if (params?.per_page) realParams.per_page = params.per_page
+
+  return client
+    .get<ApiListResponse<ApiPatientLookup>>('/lookups/patients', {
+      params: realParams,
+      signal: options?.signal,
+    })
+    .then((response) => response.data)
+}
+
+export const listPatients = async (
+  params?: ListPatientsParams,
+  options?: PatientRequestOptions
+): Promise<ApiListResponse<ApiPatient>> => {
   if (USE_MOCK) {
     const all = getMockPatients()
     let filtered = all
@@ -161,6 +236,17 @@ export const listPatients = async (params?: ListParams): Promise<ApiListResponse
       })
     }
 
+    if (params?.sort) {
+      const descending = params.sort.startsWith('-')
+      const field = params.sort.replace(/^-/, '') as keyof ApiPatient
+      filtered = [...filtered].sort((a, b) => {
+        const left = String(a[field] ?? '')
+        const right = String(b[field] ?? '')
+        const result = left.localeCompare(right, 'en', { sensitivity: 'base' })
+        return descending ? -result : result
+      })
+    }
+
     const perPage = params?.per_page ?? 10
     const page = params?.page ?? 1
     const start = (page - 1) * perPage
@@ -189,18 +275,68 @@ export const listPatients = async (params?: ListParams): Promise<ApiListResponse
   }
   if (params?.archived) realParams['filter[archived_only]'] = 1
   if (params?.inactive_before) realParams['filter[inactive_before]'] = params.inactive_before
+  if (params?.sort) realParams.sort = params.sort
   if (params?.page) realParams.page = params.page
   if (params?.per_page) realParams.per_page = params.per_page
 
   return client
-    .get<ApiListResponse<ApiPatient>>('/patients', { params: realParams })
+    .get<ApiListResponse<ApiPatient>>('/patients', {
+      params: realParams,
+      signal: options?.signal,
+    })
     .then((r) => r.data)
+}
+
+/**
+ * Fetches a bounded, complete snapshot for an explicit export action.
+ * Patient lists are normally infinite-scrolled; exporting only the pages the
+ * user happened to reveal creates incomplete clinical records. The hard page
+ * ceiling prevents an accidental unbounded download if a tenant grows beyond
+ * the mobile export's safe operating range.
+ */
+export const listPatientsForExport = async (
+  params?: Omit<ListPatientsParams, 'page' | 'per_page'>
+): Promise<ApiPatient[]> => {
+  const first = await listPatients({
+    ...params,
+    page: 1,
+    per_page: PATIENT_EXPORT_PAGE_SIZE,
+  })
+  const pagination = first.meta.pagination
+  const totalPages = pagination.total_pages ?? pagination.last_page ?? 1
+
+  if (totalPages > MAX_PATIENT_EXPORT_PAGES) {
+    throw new Error('Patient export exceeds the safe pagination limit')
+  }
+
+  const patients = [...first.data]
+  const seen = new Set(patients.map((patient) => patient.id))
+  for (let page = 2; page <= totalPages; page += 1) {
+    const response = await listPatients({
+      ...params,
+      page,
+      per_page: PATIENT_EXPORT_PAGE_SIZE,
+    })
+    for (const patient of response.data) {
+      if (!seen.has(patient.id)) {
+        seen.add(patient.id)
+        patients.push(patient)
+      }
+    }
+  }
+
+  return patients
 }
 
 export interface ApiPatientOverview {
   total_debt: number
   total_paid: number
   total_balance: number
+  totals_by_currency?: Partial<Record<'UZS' | 'USD', {
+    total_debt: number
+    total_paid: number
+    total_balance: number
+  }>>
   appointment_count: number
   // Up to 3 upcoming scheduled appointments (oldest first). Backend
   // PatientService::overview emits this subset of fields — no patient_id /
@@ -211,7 +347,10 @@ export interface ApiPatientOverview {
   >[]
 }
 
-export const getPatient = async (id: string): Promise<ApiPatient> => {
+export const getPatient = async (
+  id: string,
+  options?: { rememberRecent?: boolean }
+): Promise<ApiPatient> => {
   if (USE_MOCK) {
     const all = getMockPatients()
     const found = all.find((p) => p.id === id)
@@ -227,7 +366,29 @@ export const getPatient = async (id: string): Promise<ApiPatient> => {
       300
     )
   }
-  return client.get<ApiResponse<ApiPatient>>(`/patients/${id}`).then((r) => r.data.data)
+  return client
+    .get<ApiResponse<ApiPatient>>(`/patients/${id}`, {
+      params: options?.rememberRecent ? { remember_recent: 1 } : undefined,
+    })
+    .then((r) => r.data.data)
+}
+
+export interface ApiRecentPatient {
+  id: string
+  full_name: string
+}
+
+export const listRecentPatients = async (): Promise<ApiRecentPatient[]> => {
+  if (USE_MOCK) return mockDelay([], 150)
+  return client
+    .get<ApiResponse<ApiRecentPatient[]>>('/patients/recent')
+    .then((response) => response.data.data)
+}
+
+export const clearRecentPatients = async (): Promise<void> => {
+  requireOnline()
+  if (USE_MOCK) return mockDelay(undefined, 150)
+  await client.delete('/patients/recent')
 }
 
 export const getPatientOverview = async (id: string): Promise<ApiPatientOverview> => {
@@ -258,6 +419,10 @@ export const getPatientOverview = async (id: string): Promise<ApiPatientOverview
         total_debt: debt,
         total_paid: paid,
         total_balance: balance,
+        totals_by_currency: {
+          UZS: { total_debt: debt, total_paid: paid, total_balance: balance },
+          USD: { total_debt: 0, total_paid: 0, total_balance: 0 },
+        },
         appointment_count: 3 + (seed % 8),
         upcoming_appointments: upcoming,
       },
@@ -271,8 +436,21 @@ export const getPatientOverview = async (id: string): Promise<ApiPatientOverview
 
 // `category_id` (single, nullable) is the write shape the backend expects for
 // category assignment — the `categories` array on ApiPatient is read-only.
+export interface PatientWritePayload {
+  full_name: string
+  phone: string
+  secondary_phone?: string | null
+  date_of_birth?: string | null
+  gender?: 'male' | 'female' | null
+  address?: string | null
+  medical_history?: string | null
+  allergies?: string | null
+  current_medications?: string | null
+  category_id?: string | null
+}
+
 export const createPatient = async (
-  payload: Partial<ApiPatient> & { category_id?: string | null }
+  payload: PatientWritePayload
 ): Promise<ApiPatient> => {
   requireOnline()
   if (USE_MOCK) {
@@ -294,7 +472,7 @@ export const createPatient = async (
       current_medications: payload.current_medications,
       created_at: new Date().toISOString(),
       is_archived: false,
-      categories: payload.categories ?? [],
+      categories: [],
     }
     return mockDelay(patient, 500)
   }
@@ -303,7 +481,7 @@ export const createPatient = async (
 
 export const updatePatient = async (
   id: string,
-  payload: Partial<ApiPatient> & { category_id?: string | null }
+  payload: PatientWritePayload
 ): Promise<ApiPatient> => {
   requireOnline()
   if (USE_MOCK) {
@@ -321,7 +499,7 @@ export const updatePatient = async (
         allergies: payload.allergies,
         current_medications: payload.current_medications,
         is_archived: false,
-        categories: payload.categories ?? [],
+        categories: [],
       },
       500
     )
@@ -406,6 +584,119 @@ export const deletePatientPhoto = async (id: string): Promise<void> => {
   requireOnline()
   if (USE_MOCK) return mockDelay(undefined, 400)
   await client.delete(`/patients/${id}/photo`)
+}
+
+const GENERAL_PHOTO_VIEW_TYPE = 'smile'
+
+/** Uploads one of the patient's ten General Photos (multipart field `photo`). */
+export const uploadPatientGeneralPhoto = async (
+  id: string,
+  asset: PatientPhotoAsset
+): Promise<ApiPatient> => {
+  requireOnline()
+  if (USE_MOCK) {
+    const found = getMockPatients().find((p) => p.id === id) ?? makeMockPatient(0)
+    const current = found.oral_photo_galleries?.smile ?? []
+    const photo: ApiPatientClinicalPhoto = {
+      id: `general-photo-${Date.now()}`,
+      view_type: GENERAL_PHOTO_VIEW_TYPE,
+      scan_status: 'approved' as const,
+      url: asset.uri,
+      thumbnail_url: asset.uri,
+      preview_url: asset.uri,
+      sort_order: current.length,
+    }
+    return mockDelay({
+      ...found,
+      id,
+      oral_photo_galleries: {
+        ...found.oral_photo_galleries,
+        smile: [...current, photo],
+      },
+    }, 600)
+  }
+
+  return postPatientGeneralPhoto(
+    `/patients/${id}/oral-photos/${GENERAL_PHOTO_VIEW_TYPE}`,
+    asset
+  )
+}
+
+/** Replaces one General Photo while preserving its gallery position. */
+export const replacePatientGeneralPhoto = async (
+  id: string,
+  photoId: string,
+  asset: PatientPhotoAsset
+): Promise<ApiPatient> => {
+  requireOnline()
+  if (USE_MOCK) {
+    const found = getMockPatients().find((p) => p.id === id) ?? makeMockPatient(0)
+    const current = found.oral_photo_galleries?.smile ?? []
+    return mockDelay({
+      ...found,
+      id,
+      oral_photo_galleries: {
+        ...found.oral_photo_galleries,
+        smile: current.map((photo) => photo.id === photoId
+          ? {
+              ...photo,
+              scan_status: 'approved' as const,
+              url: asset.uri,
+              thumbnail_url: asset.uri,
+              preview_url: asset.uri,
+              updated_at: new Date().toISOString(),
+            }
+          : photo),
+      },
+    }, 600)
+  }
+
+  return postPatientGeneralPhoto(
+    `/patients/${id}/oral-photos/${GENERAL_PHOTO_VIEW_TYPE}/${photoId}/replace`,
+    asset
+  )
+}
+
+/** Deletes exactly one General Photo; the backend verifies patient ownership. */
+export const deletePatientGeneralPhoto = async (
+  id: string,
+  photoId: string
+): Promise<ApiPatient> => {
+  requireOnline()
+  if (USE_MOCK) {
+    const found = getMockPatients().find((p) => p.id === id) ?? makeMockPatient(0)
+    const current = found.oral_photo_galleries?.smile ?? []
+    return mockDelay({
+      ...found,
+      id,
+      oral_photo_galleries: {
+        ...found.oral_photo_galleries,
+        smile: current.filter((photo) => photo.id !== photoId),
+      },
+    }, 400)
+  }
+
+  return client
+    .delete<ApiResponse<ApiPatient>>(
+      `/patients/${id}/oral-photos/${GENERAL_PHOTO_VIEW_TYPE}/${photoId}`
+    )
+    .then((r) => r.data.data)
+}
+
+function postPatientGeneralPhoto(
+  endpoint: string,
+  asset: PatientPhotoAsset
+): Promise<ApiPatient> {
+  const form = new FormData()
+  const type = asset.mimeType ?? guessPhotoMime(asset.uri) ?? 'image/jpeg'
+  const name = asset.fileName ?? `patient-general-photo-${Date.now()}.${photoExt(type)}`
+  form.append('photo', { uri: asset.uri, name, type } as unknown as Blob)
+  return client
+    .post<ApiResponse<ApiPatient>>(endpoint, form, {
+      headers: { 'Content-Type': undefined },
+      timeout: 60_000,
+    })
+    .then((r) => r.data.data)
 }
 
 function guessPhotoMime(uri: string): string | null {

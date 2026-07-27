@@ -1,6 +1,5 @@
 import React, { useRef } from 'react'
 import { Animated, PanResponder, StyleSheet, ViewStyle, StyleProp } from 'react-native'
-import * as Haptics from 'expo-haptics'
 
 interface Props {
   children: React.ReactNode
@@ -52,7 +51,6 @@ export default function SwipeableWeek({ children, onSwipeLeft, onSwipeRight, sty
       }),
       onPanResponderRelease: (_e, g) => {
         if (g.dx <= -SWIPE_THRESHOLD) {
-          Haptics.selectionAsync()
           Animated.timing(translateX, {
             toValue: -300,
             duration: 180,
@@ -65,7 +63,6 @@ export default function SwipeableWeek({ children, onSwipeLeft, onSwipeRight, sty
             onSwipeLeft()
           })
         } else if (g.dx >= SWIPE_THRESHOLD) {
-          Haptics.selectionAsync()
           Animated.timing(translateX, {
             toValue: 300,
             duration: 180,

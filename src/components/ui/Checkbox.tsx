@@ -7,9 +7,10 @@ interface Props {
   checked: boolean
   onChange: (value: boolean) => void
   label?: string
+  accessibilityLabel?: string
 }
 
-export default function Checkbox({ checked, onChange, label }: Props) {
+export default function Checkbox({ checked, onChange, label, accessibilityLabel }: Props) {
   const c = useColors()
   const styles = useMemo(() => makeStyles(c), [c])
   return (
@@ -17,6 +18,9 @@ export default function Checkbox({ checked, onChange, label }: Props) {
       style={styles.row}
       onPress={() => onChange(!checked)}
       hitSlop={8}
+      accessibilityRole="checkbox"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ checked }}
     >
       <View style={[styles.box, checked && styles.boxChecked]}>
         {checked ? <Text style={styles.tick}>✓</Text> : null}

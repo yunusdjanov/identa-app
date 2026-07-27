@@ -1,5 +1,0 @@
-export { default as Odontogram } from './Odontogram'
-export { default as ToothChip } from './ToothChip'
-export { default as ToothDetailModal } from './ToothDetailModal'
-export type { ToothChipState } from './ToothChip'
-export type { ToothConditionMap, ToothBadgeMap } from './Odontogram'

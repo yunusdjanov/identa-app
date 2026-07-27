@@ -98,3 +98,25 @@ export function formatStoredPhone(input: string | null | undefined): string {
   }
   return primary
 }
+
+// Telegram's official phone-number deep link accepts an international number
+// without formatting after the leading `+`. Keep this separate from the input
+// normalizer: legacy patient records may contain valid non-Uzbek numbers.
+export function getTelegramPhoneUrl(input: string | null | undefined): string | null {
+  if (!input) return null
+  const primary = input.split('|')[0]!.trim()
+  const digits = digitsOnly(primary)
+  // E.164 numbers contain at most 15 digits. Seven is a conservative lower
+  // boundary that rejects extensions and obviously incomplete records.
+  if (digits.length < 7 || digits.length > 15) return null
+  return `https://t.me/+${digits}`
+}
+
+export function getPhoneCallUrl(input: string | null | undefined): string | null {
+  if (!input) return null
+  const primary = input.split('|')[0]!.trim()
+  const digits = digitsOnly(primary)
+  if (digits.length < 7 || digits.length > 15) return null
+  const hasInternationalPrefix = primary.startsWith('+') || digits.startsWith(COUNTRY_CODE)
+  return `tel:${hasInternationalPrefix ? '+' : ''}${digits}`
+}

@@ -12,6 +12,7 @@ interface Props {
   label: string
   value?: string
   destructive?: boolean
+  disabled?: boolean
   onPress?: () => void
   trailing?: React.ReactNode  // override default chevron
 }
@@ -25,6 +26,7 @@ export default function SettingsRow({
   label,
   value,
   destructive,
+  disabled = false,
   onPress,
   trailing,
 }: Props) {
@@ -34,7 +36,7 @@ export default function SettingsRow({
   const finalIconBg = iconBg ?? c.brandLight
 
   const handlePress = () => {
-    if (onPress) {
+    if (onPress && !disabled) {
       Haptics.selectionAsync()
       onPress()
     }
@@ -43,7 +45,14 @@ export default function SettingsRow({
   return (
     <Pressable
       onPress={handlePress}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      disabled={disabled}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityState={onPress ? { disabled } : undefined}
+      style={({ pressed }) => [
+        styles.row,
+        disabled && styles.disabled,
+        pressed && !disabled && styles.pressed,
+      ]}
     >
       {destructive ? null : (
         <View style={[styles.iconBubble, { backgroundColor: finalIconBg }]}>
@@ -84,6 +93,7 @@ function makeStyles(c: Colors) {
       minHeight: 50,
     },
     pressed: { backgroundColor: c.fillQuaternary },
+    disabled: { opacity: 0.45 },
     iconBubble: {
       width: 30,
       height: 30,

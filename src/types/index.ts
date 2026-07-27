@@ -10,6 +10,7 @@ export interface ApiUser {
   account_status: 'active' | 'blocked' | 'deleted'
   assistant_permissions?: string[]
   must_change_password?: boolean
+  show_record_authors?: boolean
   // For assistants the backend emits the owning dentist's id so the
   // mobile can scope follow-up calls correctly without a second lookup.
   dentist_owner_id?: string | null
@@ -43,6 +44,10 @@ export interface ApiSubscriptionSummary {
   grace_ends_at?: string | null
   plan_name?: string | null
   billing_period?: 'monthly' | 'yearly' | null
+  pending_plan_code?: 'basic' | 'pro' | null
+  pending_plan_name?: string | null
+  pending_billing_period?: 'monthly' | 'yearly' | null
+  pending_change_effective_at?: string | null
 }
 
 export interface ApiPatient {
@@ -52,19 +57,62 @@ export interface ApiPatient {
   // DB column allows NULL — render sites should guard for empty/null phone.
   phone: string | null
   secondary_phone?: string | null
-  date_of_birth?: string
-  gender?: 'male' | 'female'
-  address?: string
-  medical_history?: string
-  allergies?: string
-  current_medications?: string
-  photo_url?: string
-  photo_thumbnail_url?: string
-  photo_scan_status?: 'pending' | 'approved' | 'rejected'
+  date_of_birth?: string | null
+  gender?: 'male' | 'female' | null
+  address?: string | null
+  medical_history?: string | null
+  allergies?: string | null
+  current_medications?: string | null
+  photo_url?: string | null
+  photo_thumbnail_url?: string | null
+  photo_preview_url?: string | null
+  photo_thumbnail_ready?: boolean
+  photo_preview_ready?: boolean
+  photo_scan_status?: 'pending' | 'approved' | 'rejected' | null
   created_at?: string
+  updated_at?: string
+  created_by?: ApiRecordActor | null
+  updated_by?: ApiRecordActor | null
   last_visit_at?: string
   is_archived?: boolean
   categories?: ApiPatientCategory[]
+  /**
+   * The backend still calls this clinical-photo group `smile`, but the
+   * product exposes it as one flat "General photos" gallery. `top` and
+   * `bottom` are legacy web/API view types and are intentionally not shown
+   * in mobile.
+   */
+  oral_photo_galleries?: Partial<Record<ApiPatientClinicalPhotoViewType, ApiPatientClinicalPhoto[]>>
+}
+
+export type ApiPatientClinicalPhotoViewType = 'smile' | 'top' | 'bottom'
+
+export interface ApiPatientClinicalPhoto {
+  id: string
+  view_type: ApiPatientClinicalPhotoViewType
+  scan_status: 'pending' | 'approved' | 'rejected'
+  url?: string | null
+  thumbnail_url?: string | null
+  preview_url?: string | null
+  thumbnail_ready?: boolean
+  preview_ready?: boolean
+  is_primary?: boolean
+  sort_order?: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+/** Lightweight patient identity returned by appointment/payment selectors. */
+export interface ApiPatientLookup {
+  id: string
+  patient_id: string
+  full_name: string
+  phone: string | null
+  secondary_phone?: string | null
+  updated_at?: string | null
+  photo_scan_status?: 'pending' | 'approved' | 'rejected' | null
+  photo_thumbnail_url?: string | null
+  photo_url?: string | null
 }
 
 export interface ApiPatientCategory {
@@ -77,13 +125,18 @@ export interface ApiPatientCategory {
 
 export interface ApiAppointment {
   id: string
-  patient_id: string
+  patient_id: string | null
   patient_name?: string
+  guest_name?: string | null
+  guest_phone?: string | null
+  is_guest?: boolean
   appointment_date: string
   start_time: string
   end_time: string
   status: 'scheduled' | 'completed' | 'cancelled' | 'no_show'
   notes: string | null
+  created_by?: ApiRecordActor | null
+  updated_by?: ApiRecordActor | null
 }
 
 export interface ApiTreatment {
@@ -98,6 +151,7 @@ export interface ApiTreatment {
   debt_amount: number
   paid_amount: number
   balance: number
+  currency?: 'UZS' | 'USD' | null
   images: ApiTreatmentImage[]
   payments?: ApiTreatmentPayment[]
   created_at?: string
@@ -107,25 +161,6 @@ export interface ApiTreatmentPayment {
   id: string
   amount: number
   recorded_at: string // ISO timestamp
-}
-
-// Backend Payment.payment_method enum. Mobile uses these as the form
-// values; never construct a payment without one (backend rejects with
-// validation error).
-export type PaymentMethod = 'cash' | 'card' | 'bank_transfer'
-
-// Response shape from POST /patients/{id}/quick-payments. Mirrors the
-// backend's PaymentResource (id, invoice_id, patient_id, amount,
-// payment_method, payment_date, notes, created_at).
-export interface ApiPayment {
-  id: string
-  invoice_id: string
-  patient_id: string
-  amount: number
-  payment_method: PaymentMethod
-  payment_date: string  // YYYY-MM-DD
-  notes: string | null
-  created_at: string  // ISO datetime
 }
 
 export interface ApiTreatmentImage {
@@ -144,67 +179,6 @@ export interface ApiTreatmentImage {
   // Backend may quarantine images that fail content moderation. Only show
   // `approved` (or null = legacy) to the user; pending/rejected stay hidden.
   scan_status?: 'pending' | 'approved' | 'rejected' | null
-}
-
-export type ToothCondition =
-  | 'healthy'
-  | 'cavity'
-  | 'filling'
-  | 'crown'
-  | 'root_canal'
-  | 'extraction'
-  | 'implant'
-
-export interface ApiOdontogramEntry {
-  id: string
-  patient_id: string
-  tooth_number: number
-  condition_type: ToothCondition
-  surface?: string | null
-  material?: string | null
-  severity?: string | null
-  condition_date: string
-  notes?: string | null
-  created_at?: string | null
-  images?: ApiOdontogramEntryImage[]
-}
-
-export interface ApiOdontogramEntryImage {
-  id: string
-  url?: string | null
-  thumbnail_url?: string | null
-  preview_url?: string | null
-}
-
-// Backend response shape for GET /patients/{id}/odontogram/summary. Each
-// `latest_conditions` row is the most recent entry for that tooth; if the
-// dentist replaces a filling with a crown over time, only the crown shows.
-// `history_count` is the lifetime count for that tooth (used to render the
-// small badge on the odontogram).
-export interface ApiOdontogramSummaryEntry {
-  tooth_number: number
-  condition_type: ToothCondition
-  history_count: number
-  condition_date: string
-  created_at?: string | null
-}
-
-export interface ApiOdontogramSummary {
-  total_entries: number
-  affected_teeth_count: number
-  latest_conditions: ApiOdontogramSummaryEntry[]
-}
-
-export interface ApiInvoice {
-  id: string
-  patient_id: string
-  patient_name?: string
-  total_amount: number
-  paid_amount: number
-  debt_amount: number
-  status: 'paid' | 'partial' | 'unpaid'
-  created_at: string
-  treatments?: ApiTreatment[]
 }
 
 export interface ApiSession {
@@ -243,9 +217,66 @@ export interface DashboardAppointmentView {
 
 export interface DashboardSnapshot {
   date: string
+  working_hours_end: string
   revenue_this_month: number
   outstanding_debt_total: number
+  financials_by_currency: Record<DashboardCurrency, DashboardFinancialSummary>
   today_appointments: DashboardAppointmentView[]
+}
+
+export interface ApiRecordActor {
+  id: string
+  name: string
+  role: ApiUser['role']
+}
+
+export type DashboardCurrency = 'UZS' | 'USD'
+
+export interface DashboardFinancialSummary {
+  revenue_this_month: number
+  outstanding_debt_total: number
+}
+
+export interface ApiAnalyticsKpiPair {
+  current: number
+  previous: number
+}
+
+export interface ApiAnalyticsBucket {
+  key: string
+  revenue: number
+  debt: number
+  new_patients: number
+  cumulative_patients: number
+}
+
+export interface ApiAnalyticsAppointmentStatus {
+  status: ApiAppointment['status']
+  count: number
+}
+
+export interface ApiAnalyticsTopDebtor {
+  name: string
+  phone: string
+  debt: number
+}
+
+export interface ApiAnalyticsSummary {
+  currency: DashboardCurrency
+  permissions: {
+    payments: boolean
+    patients: boolean
+    appointments: boolean
+  }
+  kpis: {
+    revenue: ApiAnalyticsKpiPair
+    debt: { current: number; previous: number | null }
+    patients: ApiAnalyticsKpiPair
+    visits: ApiAnalyticsKpiPair
+  }
+  buckets: ApiAnalyticsBucket[]
+  appointment_status: ApiAnalyticsAppointmentStatus[]
+  top_debtors: ApiAnalyticsTopDebtor[]
 }
 
 export interface PaginationMeta {

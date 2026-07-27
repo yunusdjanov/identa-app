@@ -1,7 +1,10 @@
-import React, { useEffect } from 'react'
-import { Platform } from 'react-native'
-import { useQueryClient } from '@tanstack/react-query'
-import { NavigationContainer, type LinkingOptions } from '@react-navigation/native'
+import React from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  NavigationContainer,
+  type LinkingOptions,
+  type NavigatorScreenParams,
+} from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { useAuthStore } from '../stores/auth'
@@ -11,8 +14,8 @@ import CustomTabBar from '../components/navigation/CustomTabBar'
 import AppointmentCreateSheet from '../components/appointments/AppointmentCreateSheet'
 import PatientFormSheet from '../components/patients/PatientFormSheet'
 import { fromLocalDateKey } from '../lib/format'
-import { getExpoPushToken } from '../lib/notifications'
-import { registerDeviceToken } from '../api/devices'
+import { mustRotatePassword } from '../lib/permissions'
+import { getCurrentUser } from '../api/auth'
 
 // Auth screens
 import LoginScreen from '../screens/auth/LoginScreen'
@@ -21,17 +24,16 @@ import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen'
 import ResetPasswordScreen from '../screens/auth/ResetPasswordScreen'
 
 // Main screens
-import DashboardScreen from '../screens/dashboard/DashboardScreen'
 import PatientListScreen from '../screens/patients/PatientListScreen'
 import PatientDetailScreen from '../screens/patients/PatientDetailScreen'
-import OdontogramScreen from '../screens/patients/OdontogramScreen'
 import AppointmentsScreen from '../screens/appointments/AppointmentsScreen'
 import PaymentsScreen from '../screens/payments/PaymentsScreen'
+import PaymentPatientDetailScreen from '../screens/payments/PaymentPatientDetailScreen'
 import SettingsScreen from '../screens/settings/SettingsScreen'
 import AnalyticsScreen from '../screens/analytics/AnalyticsScreen'
 
 export type AuthStackParams = {
-  Login: undefined
+  Login: { initialEmail?: string } | undefined
   Register: undefined
   ForgotPassword: undefined
   // Reached via the password-reset deep link (token + email in query string).
@@ -41,16 +43,16 @@ export type AuthStackParams = {
 export type MainTabParams = {
   Dashboard: undefined
   Patients: undefined
-  Appointments: undefined
-  Payments: undefined
+  Analytics: undefined
+  Payments: { outstandingOnly?: boolean; requestId?: number } | undefined
 }
 
 export type MainStackParams = {
-  Tabs: undefined
+  Tabs: NavigatorScreenParams<MainTabParams> | undefined
   Settings: undefined
   Analytics: undefined
   PatientDetail: { id: string }
-  PatientOdontogram: { patientId: string; patientName?: string }
+  PaymentPatientDetail: { id: string }
 }
 
 const AuthStack = createNativeStackNavigator<AuthStackParams>()
@@ -67,7 +69,7 @@ function MainTabs() {
     >
       <Tab.Screen
         name="Dashboard"
-        component={DashboardScreen}
+        component={AppointmentsScreen}
         options={{ title: t('tabs.dashboard') }}
       />
       <Tab.Screen
@@ -76,9 +78,9 @@ function MainTabs() {
         options={{ title: t('tabs.patients') }}
       />
       <Tab.Screen
-        name="Appointments"
-        component={AppointmentsScreen}
-        options={{ title: t('tabs.appointments') }}
+        name="Analytics"
+        component={AnalyticsScreen}
+        options={{ title: t('analytics.title') }}
       />
       <Tab.Screen
         name="Payments"
@@ -91,26 +93,6 @@ function MainTabs() {
 
 function MainNavigator() {
   const queryClient = useQueryClient()
-
-  // Register this device's Expo push token once after the user is signed in.
-  // Token never changes for a given install/user combo, so the mock backend
-  // dedupes by token. The token also stays valid across app relaunches.
-  useEffect(() => {
-    let cancelled = false
-    getExpoPushToken().then((token) => {
-      if (cancelled || !token) return
-      registerDeviceToken({
-        expo_push_token: token,
-        platform: Platform.OS === 'ios' ? 'ios' : 'android',
-        app_version: '1.0.0',
-      }).catch(() => {
-        // Silent — push registration failure shouldn't block the user.
-      })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   const createApptOpen = useUIStore((s) => s.createAppointmentOpen)
   const createApptDate = useUIStore((s) => s.createAppointmentDate)
@@ -131,7 +113,10 @@ function MainNavigator() {
           options={{ presentation: 'modal' }}
         />
         <MainStack.Screen name="PatientDetail" component={PatientDetailScreen} />
-        <MainStack.Screen name="PatientOdontogram" component={OdontogramScreen} />
+        <MainStack.Screen
+          name="PaymentPatientDetail"
+          component={PaymentPatientDetailScreen}
+        />
         <MainStack.Screen name="Analytics" component={AnalyticsScreen} />
       </MainStack.Navigator>
 
@@ -164,9 +149,16 @@ function MainNavigator() {
   )
 }
 
+function PasswordRotationNavigator() {
+  return (
+    <MainStack.Navigator screenOptions={{ headerShown: false }}>
+      <MainStack.Screen name="Settings" component={SettingsScreen} />
+    </MainStack.Navigator>
+  )
+}
+
 // Deep link map. URLs like `identa://patient/123` will open the matching
-// in-app screen. Useful for chat/email links, push notifications, and any
-// QR codes printed by the clinic.
+// in-app screen. Useful for chat/email links and QR codes printed by the clinic.
 const linking: LinkingOptions<MainStackParams & AuthStackParams> = {
   prefixes: ['identa://', 'https://identa.uz', 'https://app.identa.uz'],
   config: {
@@ -175,14 +167,14 @@ const linking: LinkingOptions<MainStackParams & AuthStackParams> = {
         screens: {
           Dashboard: 'home',
           Patients: 'patients',
-          Appointments: 'appointments',
+          Analytics: 'tab-analytics',
           Payments: 'payments',
         },
       },
       Settings: 'settings',
       Analytics: 'analytics',
       PatientDetail: 'patient/:id',
-      PatientOdontogram: 'patient/:patientId/odontogram',
+      PaymentPatientDetail: 'payments/patient/:id',
       // Resolves while logged out (ResetPassword lives in AuthStack). Query
       // params `?token=…&email=…` map onto the screen's route params.
       ResetPassword: 'reset-password',
@@ -192,11 +184,29 @@ const linking: LinkingOptions<MainStackParams & AuthStackParams> = {
 
 export default function Navigation() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const user = useAuthStore((s) => s.user)
+  const setUser = useAuthStore((s) => s.setUser)
+  const currentUserQuery = useQuery({
+    queryKey: ['auth', 'me'],
+    queryFn: getCurrentUser,
+    enabled: isAuthenticated,
+    retry: false,
+    staleTime: 60_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: 'always',
+  })
+
+  React.useEffect(() => {
+    if (isAuthenticated && currentUserQuery.data) {
+      setUser(currentUserQuery.data)
+    }
+  }, [currentUserQuery.data, isAuthenticated, setUser])
 
   return (
     <NavigationContainer linking={linking}>
       {isAuthenticated ? (
-        <MainNavigator />
+        mustRotatePassword(user) ? <PasswordRotationNavigator /> : <MainNavigator />
       ) : (
         <AuthStack.Navigator screenOptions={{ headerShown: false }}>
           <AuthStack.Screen name="Login" component={LoginScreen} />

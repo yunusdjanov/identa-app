@@ -97,6 +97,7 @@ export default function DateWheelPicker({
       visible={visible}
       onClose={onClose}
       title={title ?? t('patients.form.dob')}
+      closeAccessibilityLabel={t('common.close')}
       scroll={false}
     >
       <View style={styles.pickerCard}>

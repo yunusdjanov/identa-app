@@ -1,11 +1,14 @@
 import client from './client'
 import type { ApiAuditLogEntry, ApiListResponse } from '../types'
+import { shouldUseMockApi } from '../lib/mockApi'
 
-// Real endpoint exists (GET /audit-logs, AuditLogController). A small mock
-// branch keeps the Action-logs sheet usable in mock mode (no backend running).
+// Real endpoint exists (GET /audit-logs, AuditLogController). Mock data is
+// opt-in so a missing environment variable never fabricates security events.
 const USE_MOCK =
-  process.env.EXPO_PUBLIC_MOCK_AUDIT !== 'false' &&
-  process.env.EXPO_PUBLIC_USE_MOCK_API !== 'false'
+  shouldUseMockApi(
+    process.env.EXPO_PUBLIC_MOCK_AUDIT,
+    process.env.EXPO_PUBLIC_USE_MOCK_API
+  )
 
 export interface AuditLogQuery {
   page?: number
@@ -46,7 +49,7 @@ function buildMockEntries(): ApiAuditLogEntry[] {
     mk(2, 'appointment.updated', 'appointment', 'a-552'),
     mk(3, 'payment.created', 'payment', 'pay-91'),
     mk(4, 'patient.treatment.created', 'treatment', 't-77'),
-    mk(5, 'auth.permission_denied', 'route', '/patients/3f2a/odontogram', {
+    mk(5, 'auth.permission_denied', 'route', '/patients/3f2a/treatments', {
       required_permission: 'patients.view',
     }),
     mk(6, 'patient.archived', 'patient', 'p-1001'),

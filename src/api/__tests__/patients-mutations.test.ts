@@ -13,6 +13,9 @@ import {
   forceDeletePatient,
   uploadPatientPhoto,
   deletePatientPhoto,
+  uploadPatientGeneralPhoto,
+  replacePatientGeneralPhoto,
+  deletePatientGeneralPhoto,
 } from '../patients'
 import { useAuthStore } from '../../stores/auth'
 import { useNetworkStore } from '../../stores/network'
@@ -133,6 +136,50 @@ describe('patient mutations', () => {
     })
     await deletePatientPhoto('p-1')
     expect(url).toBe('/patients/p-1/photo')
+  })
+
+  it('uploads a General Photo through the backend smile gallery route', async () => {
+    let bodyType = ''
+    mock.onPost('/patients/p-1/oral-photos/smile').reply((config) => {
+      bodyType = config.data?.constructor?.name ?? typeof config.data
+      return [201, { data: sample }]
+    })
+
+    await uploadPatientGeneralPhoto('p-1', {
+      uri: 'file:///general.jpg',
+      mimeType: 'image/jpeg',
+      fileName: 'general.jpg',
+    })
+
+    expect(bodyType).toBe('FormData')
+  })
+
+  it('replaces one General Photo without exposing a user-facing slot type', async () => {
+    let url = ''
+    mock.onPost('/patients/p-1/oral-photos/smile/photo-2/replace').reply((config) => {
+      url = config.url ?? ''
+      return [200, { data: sample }]
+    })
+
+    await replacePatientGeneralPhoto('p-1', 'photo-2', {
+      uri: 'file:///replacement.png',
+      mimeType: 'image/png',
+    })
+
+    expect(url).toBe('/patients/p-1/oral-photos/smile/photo-2/replace')
+  })
+
+  it('deletes exactly one General Photo by id', async () => {
+    let url = ''
+    mock.onDelete('/patients/p-1/oral-photos/smile/photo-3').reply((config) => {
+      url = config.url ?? ''
+      return [200, { data: sample }]
+    })
+
+    const result = await deletePatientGeneralPhoto('p-1', 'photo-3')
+
+    expect(url).toBe('/patients/p-1/oral-photos/smile/photo-3')
+    expect(result).toEqual(sample)
   })
 
   it('archive is offline-guarded', async () => {

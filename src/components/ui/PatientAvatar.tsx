@@ -1,13 +1,20 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { View, Text, Image, StyleSheet, ViewStyle, ImageStyle, StyleProp } from 'react-native'
 import { font } from '../../constants/theme'
+import { API_URL } from '../../constants'
+import { useAuthStore } from '../../stores/auth'
+import {
+  loadProtectedPatientPhoto,
+  normalizeProtectedPatientMediaUri,
+} from '../../lib/protectedPatientPhoto'
 
 interface Props {
   name: string
   size?: number
   style?: StyleProp<ViewStyle>
+  initialsFontSize?: number
   // When provided, render the photo instead of the initials fallback.
-  uri?: string | null
+  uri?: string | string[] | null
 }
 
 // Pastel palette deterministically chosen from name. Keeps avatars
@@ -40,14 +47,67 @@ function initialsFrom(name: string): string {
   return (first + last).toUpperCase()
 }
 
-export default function PatientAvatar({ name, size = 40, style, uri }: Props) {
+export default function PatientAvatar({
+  name,
+  size = 40,
+  style,
+  initialsFontSize,
+  uri,
+}: Props) {
   const initials = initialsFrom(name)
   const palette = PALETTE[hashCode(name) % PALETTE.length]
+  const accessToken = useAuthStore((state) => state.tokens?.access_token)
+  const userId = useAuthStore((state) => state.user?.id)
+  const candidates = (Array.isArray(uri) ? uri : uri ? [uri] : [])
+    .map(normalizeProtectedPatientMediaUri)
+    .filter((value, index, values) => values.indexOf(value) === index)
+  const sourceKey = `${candidates.join('|')}|${accessToken ?? ''}`
+  const [failedSource, setFailedSource] = useState({ key: '', index: 0 })
+  const failedCount = failedSource.key === sourceKey ? failedSource.index : 0
+  const activeUri = candidates[failedCount]
+  const isProtectedApiUri = Boolean(
+    activeUri &&
+      (activeUri === API_URL ||
+        activeUri.startsWith(`${API_URL}/`) ||
+        activeUri.startsWith(`${API_URL}?`))
+  )
+  const [downloadedSource, setDownloadedSource] = useState<{
+    remoteUri: string
+    localUri: string
+  } | null>(null)
 
-  if (uri) {
+  useEffect(() => {
+    if (!activeUri || !isProtectedApiUri || !accessToken || !userId) return
+
+    let mounted = true
+    loadProtectedPatientPhoto(activeUri, accessToken, userId)
+      .then((localUri) => {
+        if (mounted) setDownloadedSource({ remoteUri: activeUri, localUri })
+      })
+      .catch(() => {
+        if (mounted) setFailedSource({ key: sourceKey, index: failedCount + 1 })
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [accessToken, activeUri, failedCount, isProtectedApiUri, sourceKey, userId])
+
+  const displayUri = isProtectedApiUri
+    ? downloadedSource?.remoteUri === activeUri
+      ? downloadedSource.localUri
+      : undefined
+    : activeUri
+
+  if (displayUri) {
     return (
       <Image
-        source={{ uri }}
+        source={{
+          uri: displayUri,
+          headers: undefined,
+        }}
+        onError={() => setFailedSource({ key: sourceKey, index: failedCount + 1 })}
+        accessibilityLabel={name}
         style={[{ width: size, height: size, borderRadius: size / 2 }, style as StyleProp<ImageStyle>]}
       />
     )
@@ -61,7 +121,9 @@ export default function PatientAvatar({ name, size = 40, style, uri }: Props) {
         style,
       ]}
     >
-      <Text style={[styles.text, { color: palette!.fg, fontSize: size * 0.4 }]}>{initials}</Text>
+      <Text style={[styles.text, { color: palette!.fg, fontSize: initialsFontSize ?? size * 0.4 }]}>
+        {initials}
+      </Text>
     </View>
   )
 }
